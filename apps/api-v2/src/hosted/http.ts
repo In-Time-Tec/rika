@@ -3,6 +3,7 @@ import type { Principal, Resource } from "generalist/server"
 import { threadPartition } from "./partition"
 import { authorizeResource, type ProductAuthorityService } from "./product-authority"
 import type { RuntimeGateway, RuntimeWebSocket } from "./runtime-gateway"
+import { RIKA_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
 export class ApiV2HttpError extends Schema.TaggedError<ApiV2HttpError>()("RikaApiV2HttpError", {
   status: Schema.Int,
@@ -32,11 +33,41 @@ const productSessionPath = (pathname: string) => {
   }
 }
 
+const runtimePath = (pathname: string) => {
+  const match = /^\/api\/v2\/threads\/([^/]+)\/runtime(?:\/(.*))?$/.exec(pathname)
+  if (match?.[1] === undefined) return undefined
+  let threadId: string
+  try {
+    threadId = decodeURIComponent(match[1])
+  } catch {
+    return undefined
+  }
+  const suffix = match[2] === undefined || match[2] === "" ? "/" : `/${match[2]}`
+  return { threadId, upstreamPath: suffix }
+}
+
+const upstreamRequest = (request: Request, pathname: string) => {
+  const clone = request.clone()
+  const headers = Object.fromEntries(clone.headers.entries())
+  headers[RIKA_ORIGINAL_REQUEST_URL] = request.url
+  const init: RequestInit = { method: clone.method, headers }
+  if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
+    Object.assign(init, { body: clone.body, duplex: "half" })
+  const target = new URL(pathname, request.url)
+  target.search = new URL(request.url).search
+  return new Request(target.toString(), init)
+}
+
 const upstreamResource = (pathname: string): Resource | undefined => {
+  if (pathname === "/sessions") return { type: "session" }
+  if (pathname === "/runs") return { type: "run" }
+  if (pathname === "/artifacts") return { type: "artifact" }
   const session = /^\/sessions\/([^/]+)(?:\/|$)/.exec(pathname)?.[1]
   if (session !== undefined) return { type: "session", id: decodeURIComponent(session) }
   const run = /^\/runs\/([^/]+)(?:\/|$)/.exec(pathname)?.[1]
   if (run !== undefined) return { type: "run", id: decodeURIComponent(run) }
+  const artifact = /^\/artifacts\/([^/]+)(?:\/|$)/.exec(pathname)?.[1]
+  if (artifact !== undefined) return { type: "artifact", id: decodeURIComponent(artifact) }
   return undefined
 }
 
@@ -86,13 +117,14 @@ const handleSessionRequest = Effect.fn("RikaApiV2.Http.handleSessionRequest")(fu
     principal: input.principal,
     resource: { type: "session", id: partition.rootSessionId },
     action: "mutate",
+    threadId: input.threadId,
   }).pipe(Effect.mapError(() => unavailable()))
   if (!allowed) return yield* forbidden()
   const commandId = input.request.headers.get("x-command-id")
   if (commandId === null || commandId.length === 0)
     return yield* ApiV2HttpError.make({ status: 400, message: "x-command-id is required" })
   const receipt = yield* input.gateway
-    .ensureRootSession(partition, commandId)
+    .ensureRootSession(partition, commandId, input.request)
     .pipe(Effect.mapError(() => unavailable()))
   return new Response(receiptBody(receipt), {
     status: receipt.created ? 201 : 200,
@@ -124,6 +156,7 @@ const handleResourceRequest = Effect.fn("RikaApiV2.Http.handleResourceRequest")(
     principal: input.principal,
     resource: input.resource,
     action: input.request.method === "GET" ? "observe" : "mutate",
+    threadId: input.threadId,
   }).pipe(Effect.mapError(() => unavailable()))
   if (!allowed) return yield* forbidden()
   return yield* input.gateway
@@ -143,26 +176,30 @@ const handle = (input: {
     const pathname = new URL(request.url).pathname
     if (pathname === "/healthz") return new Response(healthBody, { status: 200 })
 
-    const requestedThreadId = productSessionPath(pathname)
-    const resource = requestedThreadId === undefined ? upstreamResource(pathname) : undefined
+    const route = runtimePath(pathname)
+    const productSessionThreadId = productSessionPath(pathname)
+    const requestedThreadId = productSessionThreadId ?? route?.threadId
+    const upstreamPath = route?.upstreamPath ?? pathname
+    const resource = upstreamResource(upstreamPath)
     const resourceThreadId =
-      resource === undefined
+      route?.threadId ??
+      (resource === undefined
         ? undefined
-        : yield* input.authority.resourceThread(resource).pipe(Effect.mapError(() => unavailable()))
+        : yield* input.authority.resourceThread(resource).pipe(Effect.mapError(() => unavailable())))
     const principal = yield* authenticateRequest({
       authority: input.authority,
       request,
       requestedThreadId,
       resourceThreadId,
     })
-    if (requestedThreadId !== undefined)
+    if (productSessionThreadId !== undefined)
       return yield* handleSessionRequest({
         authority: input.authority,
         gateway: input.gateway,
         environment: input.environment,
-        request,
+        request: route === undefined ? request : upstreamRequest(request, upstreamPath),
         principal,
-        threadId: requestedThreadId,
+        threadId: productSessionThreadId,
       })
     if (resource === undefined) return new Response("Not found", { status: 404 })
     if (resourceThreadId === undefined) return yield* forbidden()
@@ -170,7 +207,7 @@ const handle = (input: {
       authority: input.authority,
       gateway: input.gateway,
       environment: input.environment,
-      request,
+      request: route === undefined ? request : upstreamRequest(request, upstreamPath),
       principal,
       resource,
       threadId: resourceThreadId,

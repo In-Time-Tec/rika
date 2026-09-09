@@ -1,10 +1,9 @@
-/* oxlint-disable anti-slop -- Rivet's public raw client is an I/O boundary and returns untyped JSON payloads. */
-/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-runtime-typeof, anti-slop/require-safety-comment-for-type-assertion, anti-slop/no-conditional-empty-object-spread */
-/* oxlint-disable anti-slop/no-chained-type-assertions -- the released factory hides its structural driver type. */
-/* oxlint-disable effecttsgo/async-function -- ClientRaw and registry.handler are Promise-based public APIs. */
-/* oxlint-disable effecttsgo/strict-boolean-expressions -- Web Fetch body/nullability is normalized at this adapter boundary. */
-/* oxlint-disable typescript/no-unsafe-type-assertion -- Rivet's public ClientRaw constructor intentionally hides its driver interface. */
-/* oxlint-disable typescript/no-unnecessary-type-assertion -- response.json() is intentionally treated as an untrusted payload. */
+/* oxlint-disable anti-slop -- the released Rivet client is a foreign Fetch/WebSocket boundary. */
+/* oxlint-disable anti-slop/no-unknown-parameters, anti-slop/no-unknown-returns, anti-slop/no-runtime-typeof, anti-slop/require-safety-comment-for-type-assertion */
+/* oxlint-disable effecttsgo/async-function -- the released client exposes Promise-based transport methods. */
+/* oxlint-disable effecttsgo/missing-pipeable-signature -- exported pure transport helpers are testable interop seams. */
+/* oxlint-disable typescript/no-unsafe-type-assertion -- the public client adapter narrows only documented raw methods. */
+/* oxlint-disable effecttsgo/prefer-schema-over-json -- Generalist's released HTTP endpoint consumes JSON. */
 import { Effect } from "effect"
 import type { ThreadPartition } from "./partition"
 import {
@@ -13,222 +12,251 @@ import {
   type RuntimeGateway,
   type RuntimeWebSocket,
 } from "./runtime-gateway"
-import { createRawRivetClient, type RawRivetClient, type RuntimeRegistry } from "./rivet-actor"
-export { RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+import { createRawRivetClient, type RawRivetClient } from "./rivet-actor"
+import { RIKA_ORIGINAL_REQUEST_URL, RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
-export interface RawRivetRegistry {
-  readonly handler: RuntimeRegistry["handler"]
-}
+export { RIKA_ORIGINAL_REQUEST_URL, RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
 export interface RawRivetClientOptions {
-  /** Origin used for requests passed to the registry handler. */
-  readonly endpoint?: string
+  /** Engine endpoint; this is the released Client transport endpoint, not the serverless pool URL. */
+  readonly endpoint: string
+  readonly token?: string
+  readonly namespace?: string
 }
 
 export interface RawRivetGatewayOptions extends RawRivetClientOptions {
-  readonly registry: RawRivetRegistry
-}
-
-export interface RawRivetClientGateway {
-  readonly client: RawRivetClient
-  readonly ensureActor: (
-    key: ReadonlyArray<string>,
-  ) => Effect.Effect<{ readonly actorId: string; readonly created: boolean }, RuntimeGatewayError>
-}
-
-interface ActorOutput {
-  readonly actorId: string
-  readonly name: string
-  readonly key: string
-  readonly created?: boolean
-}
-
-interface ActorsResponse {
-  readonly actors?: ReadonlyArray<{
-    readonly actor_id?: unknown
-    readonly name?: unknown
-    readonly key?: unknown
-  }>
-  readonly actor?: {
-    readonly actor_id?: unknown
-    readonly name?: unknown
-    readonly key?: unknown
-  }
-  readonly created?: unknown
-}
-
-const actorKey = (key: ReadonlyArray<string>) => {
-  if (key.length === 0) return "/"
-  return key
-    .map((part) => {
-      if (part === "") return "\\0"
-      return part.replaceAll("\\", "\\\\").replaceAll("/", "\\/")
-    })
-    .join("/")
-}
-
-const actorOutput = (value: unknown): ActorOutput | undefined => {
-  if (typeof value !== "object" || value === null) return undefined
-  const actor = value as ActorsResponse["actor"]
-  if (typeof actor?.actor_id !== "string" || typeof actor.name !== "string" || typeof actor.key !== "string")
-    return undefined
-  return { actorId: actor.actor_id, name: actor.name, key: actor.key }
-}
-
-// ast-grep-ignore: effect-prefer-program-construction -- foreign Fetch response adapter.
-const responseBody = async (response: Response) => {
-  try {
-    return (await response.json()) as unknown
-  } catch {
-    return undefined
-  }
-}
-
-// ast-grep-ignore: effect-prefer-program-construction -- foreign Fetch response adapter.
-const responseError = async (response: Response) => {
-  const body = await responseBody(response)
-  if (typeof body === "object" && body !== null && "message" in body && typeof body.message === "string")
-    return body.message
-  return `${response.status} ${response.statusText}`
-}
-
-// ast-grep-ignore: effect-prefer-program-construction -- foreign Fetch request adapter.
-const requestBody = async (request: Request) => {
-  if (request.method === "GET" || request.method === "HEAD") return undefined
-  if (!request.body) return undefined
-  return new Uint8Array(await request.arrayBuffer())
-}
-
-// ast-grep-ignore: effect-prefer-program-construction -- Rivet registry's Promise-based handler adapter.
-const makeRegistryRequest = async (registry: RawRivetRegistry, endpoint: string, path: string, init: RequestInit = {}) => {
-  const body = init.body
-  const request = new Request(new URL(path, endpoint).toString(), {
-    ...init,
-    ...(body === undefined ? {} : { body }),
-  })
-  return registry.handler(request)
-}
-
-// ast-grep-ignore: effect-prefer-program-construction -- Rivet registry's Promise-based handler adapter.
-const engineActorRequest = async (registry: RawRivetRegistry, endpoint: string, input: {
-  readonly method: "GET" | "PUT" | "POST"
-  readonly path: string
-  readonly body?: unknown
-}) => {
-  const body = input.body === undefined ? undefined : JSON.stringify(input.body)
-  const response = await makeRegistryRequest(registry, endpoint, input.path, {
-    method: input.method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body,
-  })
-  if (!response.ok) throw new Error(await responseError(response))
-  return responseBody(response)
-}
-
-const outputFromResponse = (value: unknown) => {
-  if (typeof value !== "object" || value === null) return undefined
-  const response = value as ActorsResponse
-  const actor = response.actor ?? response.actors?.[0]
-  const output = actorOutput(actor)
-  if (output === undefined) return undefined
-  return response.created === undefined || typeof response.created !== "boolean"
-    ? output
-    : { ...output, created: response.created }
+  /** Inject the released raw client seam for deterministic transport tests. */
+  readonly client?: RawRivetClient
 }
 
 const runtimeError = (error: unknown, kind: RuntimeGatewayError["kind"] = "unknown") =>
   RuntimeGatewayError.make({ kind, message: error instanceof Error ? error.message : String(error) })
 
-/**
- * A small adapter around Rivet's released raw client. The adapter owns no actor identity: every operation resolves the
- * canonical actor by the stable key, and the registry remains the authority for actor creation and routing.
- */
-export const makeRawRivetClient = (options: RawRivetGatewayOptions): RawRivetClientGateway => {
-  const endpoint = options.endpoint ?? "http://rivet.local"
-  // ast-grep-ignore: effect-prefer-program-construction -- released Rivet driver contract is Promise-based.
-  const getWithKey = async (input: { readonly name: string; readonly key: ReadonlyArray<string> }) => {
-    const value = await engineActorRequest(options.registry, endpoint, {
-      method: "GET",
-      path: `/actors?name=${encodeURIComponent(input.name)}&key=${encodeURIComponent(actorKey(input.key))}`,
-    })
-    return outputFromResponse(value)
-  }
-  // ast-grep-ignore: effect-prefer-program-construction -- released Rivet driver contract is Promise-based.
-  const getOrCreateWithKey = async (input: { readonly name: string; readonly key: ReadonlyArray<string> }) => {
-    const value = await engineActorRequest(options.registry, endpoint, {
-      method: "PUT",
-      path: "/actors",
-      body: {
-        name: input.name,
-        key: actorKey(input.key),
-        crash_policy: "sleep",
-        runner_name_selector: "default",
-      },
-    })
-    const output = outputFromResponse(value)
-    if (output === undefined) throw new Error("Rivet did not return an actor identity")
-    return output
-  }
-  // ast-grep-ignore: effect-prefer-program-construction -- released Rivet driver contract is Promise-based.
-  const sendRequest = async (
-    target:
-      | { readonly directId: string }
-      | { readonly getForKey: { readonly name: string; readonly key: ReadonlyArray<string> } },
-    actorRequest: Request,
-  ) => {
-    const targetActor =
-      "directId" in target
-        ? target.directId
-        : (await getWithKey({ name: target.getForKey.name, key: target.getForKey.key }))?.actorId
-    if (targetActor === undefined) throw new Error("Rivet actor was not found for the canonical key")
-    const actorUrl = new URL(actorRequest.url)
-    const path = `${actorUrl.pathname}${actorUrl.search}`
-    const body = await requestBody(actorRequest)
-    const init: RequestInit = {
-      method: actorRequest.method,
-      headers: actorRequest.headers,
-      signal: actorRequest.signal,
-    }
-    if (body !== undefined) Object.assign(init, { body })
-    const response = await makeRegistryRequest(options.registry, endpoint, `/gateway/${encodeURIComponent(targetActor)}${path}`, init)
-    return response
-  }
-
-  // The public raw-client factory takes an intentionally non-exported driver type, so the structural adapter is
-  // narrowed at this one boundary while retaining normal Rivet raw-client request construction.
-  const driver = { getWithKey, getOrCreateWithKey, sendRequest }
-  const client = createRawRivetClient(driver as never)
-  const ensureActor = (key: ReadonlyArray<string>): Effect.Effect<
-    { readonly actorId: string; readonly created: boolean },
-    RuntimeGatewayError
-  > =>
-    Effect.tryPromise({
-      // ast-grep-ignore: effect-prefer-program-construction -- released Rivet driver contract is Promise-based.
-      try: async () => {
-        const existing = await getWithKey({ name: "rikaRuntime", key })
-        if (existing !== undefined) return { actorId: existing.actorId, created: false }
-        const created = await getOrCreateWithKey({ name: "rikaRuntime", key })
-        return { actorId: created.actorId, created: created.created ?? true }
-      },
-      catch: (error) => runtimeError(error, "unavailable"),
-    })
-  return { client, ensureActor }
+const requestHeaders = (request: Request, originalUrl: string) => {
+  const headers = Object.fromEntries(request.headers.entries())
+  headers[RIKA_ORIGINAL_REQUEST_URL] = originalUrl
+  const { [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl, ...safeHeaders } = headers
+  void _internalOriginalUrl
+  return safeHeaders
 }
 
-/** Build a RuntimeGateway that forwards existing Generalist Server routes through a concrete Rivet actor. */
+const actorRequest = (request: Request | undefined, path: string, init: RequestInit) => {
+  const source = request ?? new Request("https://rika.invalid/runtime")
+  const originalUrl = source.headers.get(RIKA_ORIGINAL_REQUEST_URL) ?? source.url
+  const merged = new Headers(source.headers)
+  new Headers(init.headers).forEach((value, key) => merged.set(key, value))
+  const headers = Object.fromEntries(merged.entries())
+  headers[RIKA_ORIGINAL_REQUEST_URL] = originalUrl
+  const { [RIVET_ORIGINAL_REQUEST_URL]: _internalOriginalUrl, ...safeHeaders } = headers
+  void _internalOriginalUrl
+  const next: RequestInit = { ...init, headers: safeHeaders }
+  return new Request(new URL(path, source.url).toString(), next)
+}
+
+const copyBodyRequest = (request: Request, path: string) => {
+  const clone = request.clone()
+  const init: RequestInit = {
+    method: clone.method,
+    headers: requestHeaders(request, request.headers.get(RIKA_ORIGINAL_REQUEST_URL) ?? request.url),
+    signal: clone.signal,
+  }
+  if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
+    Object.assign(init, { body: clone.body, duplex: "half" })
+  return new Request(new URL(path, clone.url).toString(), init)
+}
+
+const responseIsSuccess = (response: Response) => response.status >= 200 && response.status < 300
+
+/**
+ * Forward existing Generalist HTTP routes through Rivet's released public client. Actor identity is always resolved by
+ * the stable partition key; this adapter does not reimplement the EngineControlClient protocol.
+ */
+export const makeRawRivetClient = (options: RawRivetClientOptions): RawRivetClient => {
+  const config = {
+    endpoint: options.endpoint,
+    disableMetadataLookup: false,
+    encoding: "bare" as const,
+  }
+  if (options.token !== undefined) Object.assign(config, { token: options.token })
+  if (options.namespace !== undefined) Object.assign(config, { namespace: options.namespace })
+  return createRawRivetClient(config)
+}
+
 export const makeRawRivetGateway = (options: RawRivetGatewayOptions): RuntimeGateway => {
-  const raw = makeRawRivetClient(options)
-  const actorFor = (partition: ThreadPartition) => raw.client.get("rikaRuntime", [...partition.actorKey])
+  const client = options.client ?? makeRawRivetClient(options)
+  const actorFor = (partition: ThreadPartition, create = false) =>
+    (create ? client.getOrCreate : client.get)("rikaRuntime", [...partition.actorKey])
 
   return {
-    ensureRootSession: (partition, _commandId): Effect.Effect<RootSessionReceipt, RuntimeGatewayError> =>
-      raw.ensureActor(partition.actorKey).pipe(
-        Effect.map((result) => ({ sessionId: partition.rootSessionId, created: result.created })),
-      ),
-    handle: (partition, request, _websocket?: RuntimeWebSocket): Effect.Effect<Response, RuntimeGatewayError> =>
+    ensureRootSession: (partition, commandId, request): Effect.Effect<RootSessionReceipt, RuntimeGatewayError> =>
       Effect.tryPromise({
-        try: () => actorFor(partition).fetch(request),
+        // ast-grep-ignore: effect-prefer-program-construction -- released Rivet client transport is Promise-based.
+        try: async () => {
+          const actor = actorFor(partition)
+          const existing = await actor.fetch(
+            actorRequest(request, `/sessions/${encodeURIComponent(partition.rootSessionId)}`, { method: "GET" }),
+          )
+          if (responseIsSuccess(existing)) return { sessionId: partition.rootSessionId, created: false }
+          const create = actorRequest(request, "/sessions", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-command-id": commandId },
+            body: JSON.stringify({ id: partition.rootSessionId, title: `Thread ${partition.threadId}`, agent: "rika" }),
+          })
+          const response = await actorFor(partition, true).fetch(create)
+          if (responseIsSuccess(response)) return { sessionId: partition.rootSessionId, created: true }
+          const retry = await actor.fetch(
+            actorRequest(request, `/sessions/${encodeURIComponent(partition.rootSessionId)}`, { method: "GET" }),
+          )
+          if (responseIsSuccess(retry)) return { sessionId: partition.rootSessionId, created: false }
+          throw new Error(`Generalist Session create/read failed (${response.status}/${retry.status})`)
+        },
+        catch: (error) => runtimeError(error, "unavailable"),
+      }),
+    handle: (partition, request, websocket?: RuntimeWebSocket): Effect.Effect<Response, RuntimeGatewayError> =>
+      Effect.tryPromise({
+        // ast-grep-ignore: effect-prefer-program-construction -- released Rivet client transport is Promise-based.
+        try: async () => {
+          const actor = actorFor(partition)
+          if (websocket !== undefined && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+            const gatewayUrl = gatewayWebSocketUrl(await actor.getGatewayUrl(), request.url)
+            const headers = Object.fromEntries(
+              Object.entries(requestHeaders(request, request.headers.get(RIKA_ORIGINAL_REQUEST_URL) ?? request.url)).filter(
+                ([name]) =>
+                  ![
+                    "connection",
+                    "host",
+                    "sec-websocket-accept",
+                    "sec-websocket-extensions",
+                    "sec-websocket-key",
+                    "sec-websocket-protocol",
+                    "sec-websocket-version",
+                    "upgrade",
+                  ].includes(name),
+              ),
+            )
+            const upstream = openServerWebSocket(gatewayUrl, headers)
+            bridgeWebSocket(upstream, websocket)
+            return new Response(null, { status: 101 })
+          }
+          return actor.fetch(copyBodyRequest(request, new URL(request.url).pathname + new URL(request.url).search))
+        },
         catch: (error) => runtimeError(error, "unavailable"),
       }),
   }
+}
+
+const openServerWebSocket = (url: URL, headers: Record<string, string>) =>
+  // ast-grep-ignore: effect-prefer-socket -- Bun's server-side WebSocket constructor is the explicit transport adapter.
+  new WebSocket(url.toString(), { protocols: ["rivet", "rivet_encoding.bare"], headers })
+
+export const gatewayWebSocketUrl = (gateway: string, request: string) => {
+  const gatewayUrl = new URL(gateway)
+  const requestUrl = new URL(request)
+  gatewayUrl.pathname = `${gatewayUrl.pathname.replace(/\/$/, "")}/websocket${requestUrl.pathname}`
+  const query = new URLSearchParams(gatewayUrl.search)
+  requestUrl.searchParams.forEach((value, key) => query.append(key, value))
+  gatewayUrl.search = query.toString()
+  return gatewayUrl
+}
+
+type WebSocketData = string | ArrayBuffer | ArrayBufferView
+
+const webSocketDataSize = (data: WebSocketData) =>
+  typeof data === "string" ? new TextEncoder().encode(data).byteLength : data.byteLength
+
+const isWebSocketData = (data: unknown): data is WebSocketData =>
+  typeof data === "string" || data instanceof ArrayBuffer || ArrayBuffer.isView(data)
+
+export const bridgeWebSocket = (upstream: unknown, downstream: RuntimeWebSocket) => {
+  const socket = upstream as {
+    readonly addEventListener?: (type: string, listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void) => void
+    readonly send?: (data: WebSocketData) => void
+    readonly close?: (code?: number, reason?: string) => void
+  }
+  const pending: WebSocketData[] = []
+  let pendingBytes = 0
+  let opened = false
+  let closed = false
+
+  const closeBoth = (code: number, reason: string, closeUpstream: boolean, closeDownstream: boolean) => {
+    if (closed) return
+    closed = true
+    pending.length = 0
+    pendingBytes = 0
+    if (closeUpstream) {
+      try {
+        socket.close?.(code, reason)
+      } catch {
+        // Keep downstream fail-closed when the foreign socket close throws.
+      }
+    }
+    if (closeDownstream) {
+      try {
+        downstream.close(code, reason)
+      } catch {
+        // The local host owns this socket; there is no recovery after close failure.
+      }
+    }
+  }
+
+  const send = (data: unknown) => {
+    if (closed) return
+    if (!isWebSocketData(data)) return
+    if (!opened) {
+      const size = webSocketDataSize(data)
+      if (pending.length >= 128 || pendingBytes + size > 4 * 1024 * 1024) {
+        closeBoth(1009, "Upstream WebSocket buffer exceeded", true, true)
+        return
+      }
+      pending.push(data)
+      pendingBytes += size
+      return
+    }
+    try {
+      socket.send?.(data)
+    } catch {
+      closeBoth(1011, "Upstream WebSocket failed", true, true)
+    }
+  }
+  socket.addEventListener?.("open", () => {
+    if (closed) {
+      try {
+        socket.close?.(1000, "Downstream WebSocket closed")
+      } catch {
+        // The foreign socket is already unavailable.
+      }
+      return
+    }
+    opened = true
+    while (pending.length > 0) {
+      if (closed) break
+      const data = pending.shift()
+      if (data === undefined) continue
+      pendingBytes -= webSocketDataSize(data)
+      try {
+        socket.send?.(data)
+      } catch {
+        closeBoth(1011, "Upstream WebSocket failed", true, true)
+      }
+    }
+  })
+  socket.addEventListener?.("message", (event) => {
+    if (!closed && isWebSocketData(event.data)) {
+      try {
+        downstream.send(event.data)
+      } catch {
+        closeBoth(1011, "Downstream WebSocket failed", true, true)
+      }
+    }
+  })
+  socket.addEventListener?.("error", () => {
+    closeBoth(1011, "Upstream WebSocket failed", true, true)
+  })
+  socket.addEventListener?.("close", (event) => {
+    closeBoth(event.code ?? 1000, event.reason ?? "Upstream WebSocket closed", false, true)
+  })
+  downstream.addEventListener?.("message", (event) => send(event.data))
+  downstream.addEventListener?.("close", () => {
+    closeBoth(1000, "Downstream WebSocket closed", true, false)
+  })
 }

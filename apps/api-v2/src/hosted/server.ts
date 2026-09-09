@@ -7,12 +7,12 @@ import type { HostOptions } from "./host"
 import { hostEffect } from "./host"
 import { threadPartition, type ThreadPartition } from "./partition"
 import { authorizeResource, type ProductAuthorityService } from "./product-authority"
-import { RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+import { RIKA_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
 type ServerUnauthorized = InstanceType<typeof Server["Unauthorized"]>
 
 export const originalRequestForAuthentication = (request: Request) => {
-  const url = request.headers.get(RIVET_ORIGINAL_REQUEST_URL)
+  const url = request.headers.get(RIKA_ORIGINAL_REQUEST_URL)
   if (url === null) return request
   try {
     const clone = request.clone()
@@ -66,7 +66,10 @@ export const serverOptionsEffect = (input: {
     const auth = authentication(input)
     const authorization: ServerAuthorization = {
       tenantId: input.partition.ownerId,
-      authorize: (resource) => authorizeResource(input.authority, resource).pipe(Effect.orElseSucceed(() => false)),
+      authorize: ({ principal, resource, action }) =>
+        authorizeResource(input.authority, { principal, resource, action, threadId: input.partition.threadId }).pipe(
+          Effect.orElseSucceed(() => false),
+        ),
     }
     return { host, auth, authorization } satisfies RuntimeActorServerOptions
   })

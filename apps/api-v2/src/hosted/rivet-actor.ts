@@ -1,7 +1,10 @@
 /* oxlint-disable typescript/no-unsafe-type-assertion -- the released raw-client factory hides its driver surface. */
 /* oxlint-disable anti-slop/no-chained-type-assertions -- the released raw-client factory hides its driver surface. */
+/* oxlint-disable anti-slop/no-unknown-returns -- the released client WebSocket type is intentionally platform-specific. */
+/* oxlint-disable effecttsgo/prefer-effect-signatures -- released Rivet client actions are Promise-based foreign boundaries. */
 import { Effect, Layer, Schema } from "effect"
-import { createClientWithDriver, setup, type RegistryConfigInput } from "rivetkit"
+import { setup, type RegistryConfigInput } from "rivetkit"
+import { createClient, type ClientConfigInput } from "rivetkit/client"
 import {
   makeRuntimeActor,
   type RuntimeActorDefinition,
@@ -27,17 +30,22 @@ export interface RuntimeRegistry {
 }
 
 export interface RawRivetActorHandle {
-  readonly fetch: typeof fetch
+  readonly fetch: (request: Request) => ReturnType<typeof fetch>
+  // ast-grep-ignore: effect-prefer-effect-signatures -- released Rivet client URL resolution is a Promise-based foreign boundary.
+  readonly getGatewayUrl: () => Promise<string>
+  // ast-grep-ignore: effect-prefer-effect-signatures -- released Rivet client actions are Promise-based foreign boundaries.
+  readonly action: (input: { readonly name: string; readonly args: unknown[] }) => Promise<unknown>
 }
 
 export interface RawRivetClient {
   readonly get: (name: string, key?: string | string[]) => RawRivetActorHandle
+  readonly getOrCreate: (name: string, key?: string | string[]) => RawRivetActorHandle
 }
 
-/** Keep the released raw-client factory behind the only Rivet import seam. */
-export const createRawRivetClient = (driver: never): RawRivetClient =>
-  // SAFETY: The released factory returns a ClientRaw whose get/fetch contract matches this narrow adapter surface.
-  createClientWithDriver(driver, { encoding: "bare" }) as unknown as RawRivetClient
+/** Keep the released public client factory behind the only Rivet import seam. */
+export const createRawRivetClient = (config: string | ClientConfigInput): RawRivetClient =>
+  // SAFETY: createClient returns the released ClientRaw surface; the adapter narrows only the raw get/fetch/webSocket methods.
+  createClient(config)
 
 export interface RuntimeActorOptions {
   readonly authority: ProductAuthorityService

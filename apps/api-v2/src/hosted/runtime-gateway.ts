@@ -6,6 +6,8 @@ import { authorizeResource, type ProductAuthorityService } from "./product-autho
 export interface RuntimeWebSocket {
   readonly close: (code?: number, reason?: string) => void
   readonly send: (data: string | ArrayBuffer | ArrayBufferView) => void
+  readonly addEventListener?: (type: string, listener: (event: { readonly data: unknown }) => void) => void
+  readonly dispatch?: (event: { readonly data: unknown; readonly type?: string }) => void
 }
 
 export class RuntimeGatewayError extends Schema.TaggedError<RuntimeGatewayError>()("RikaApiV2RuntimeGatewayError", {
@@ -23,6 +25,7 @@ export interface RuntimeGateway {
   readonly ensureRootSession: (
     partition: ThreadPartition,
     commandId: string,
+    request?: Request,
   ) => Effect.Effect<RootSessionReceipt, RuntimeGatewayError>
   /** Forward one already-authenticated HTTP or WebSocket request to the actor's Generalist Server. */
   readonly handle: (
@@ -49,6 +52,7 @@ export const authorizedRuntimeRequest = Effect.fn("RikaApiV2.RuntimeGateway.auth
     principal: input.principal,
     resource: input.resource,
     action: input.request.method === "GET" ? "observe" : "mutate",
+    threadId: input.partition.threadId,
   })
   if (!allowed)
     return yield* RuntimeGatewayError.make({ kind: "rejected", message: "Execution resource is unavailable" })

@@ -1,4 +1,5 @@
 import { BunCrypto } from "@effect/platform-bun"
+/* oxlint-disable effecttsgo/effect-succeed-with-void -- auth rejection fixture returns no principal by design. */
 import { Effect, Layer, Stream } from "effect"
 import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
 import { it } from "@effect/vitest"
@@ -77,6 +78,57 @@ it.effect("creates an explicit local Rika/Rivet host with one registry lifecycle
       yield* Effect.tryPromise(() => host.close())
       expect(response.status).toBe(200)
       expect(host.registry.config.use.rikaRuntime).toBeDefined()
+    }),
+  ),
+)
+
+it.effect("rejects unauthenticated upgrades before any gateway transport forwarding", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      let forwarded = 0
+      const unauthenticated: ProductAuthorityService = {
+        authenticateBearer: () =>
+          Effect.succeed(undefined),
+        threadBinding: () => Effect.succeed(binding),
+        resourceThread: () => Effect.succeed(partition.threadId),
+        authorize: () => Effect.succeed(true),
+      }
+      const response = yield* makeApiV2LocalHost({
+        authority: unauthenticated,
+        environment: "test",
+        storage: Layer.merge(DurabilityTesting.layer(yield* DurabilityTesting.make()), BunCrypto.layer),
+        model,
+        revision: "test-build",
+        workspace: () => Effect.succeed(workspace),
+        gateway: {
+          ensureRootSession: gateway.ensureRootSession,
+          handle: () => {
+            forwarded += 1
+            return Effect.succeed(new Response("must not forward"))
+          },
+        },
+        registry: {
+          runtime: "native",
+          endpoint: "http://127.0.0.1:6420",
+          startEngine: false,
+          startServices: false,
+          noWelcome: true,
+        },
+        startRegistry: false,
+      }).pipe(
+        Effect.flatMap((host) =>
+          Effect.tryPromise(() =>
+            host.fetch(
+              new Request("https://rika.test/api/v2/threads/thread/runtime/sessions/root/ws", {
+                headers: { upgrade: "websocket", connection: "Upgrade" },
+              }),
+              { send: () => undefined, close: () => undefined },
+            ),
+          ).pipe(Effect.tap(() => Effect.tryPromise(() => host.close()))),
+        ),
+      )
+      expect(response.status).toBe(401)
+      expect(forwarded).toBe(0)
     }),
   ),
 )

@@ -24,6 +24,9 @@ export interface ApiV2ApplicationOptions {
   readonly workspace: RuntimeActorOptions["workspace"]
   readonly actorOptions?: RuntimeActorOptions["actorOptions"]
   readonly registry?: RuntimeActorOptions["registry"]
+  readonly rivetEndpoint?: string
+  readonly rivetToken?: string
+  readonly rivetNamespace?: string
   readonly gateway?: RuntimeGateway
 }
 
@@ -67,7 +70,12 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
     if (options.actorOptions !== undefined) Object.assign(actorOptions, { actorOptions: options.actorOptions })
     if (options.registry !== undefined) Object.assign(actorOptions, { registry: options.registry })
     const registry = rivetRegistry(actorOptions)
-    const gateway = options.gateway ?? makeRawRivetGateway({ registry })
+    const gatewayOptions = {
+      endpoint: options.rivetEndpoint ?? options.registry?.endpoint ?? "http://127.0.0.1:6420",
+    }
+    if (options.rivetToken !== undefined) Object.assign(gatewayOptions, { token: options.rivetToken })
+    if (options.rivetNamespace !== undefined) Object.assign(gatewayOptions, { namespace: options.rivetNamespace })
+    const gateway = options.gateway ?? makeRawRivetGateway(gatewayOptions)
     const runtimeActor = registry.config.use.rikaRuntime
     const partitionForThread = (input: {
       readonly ownerId: string

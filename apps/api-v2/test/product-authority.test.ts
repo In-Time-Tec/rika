@@ -146,3 +146,50 @@ it.effect("denies a revoked hosted client before Generalist resource admission",
     expect(allowed).toBe(false)
   }),
 )
+
+it.effect("authorizes opaque Runs and artifacts only in the explicit canonical Thread partition", () =>
+  Effect.gen(function* () {
+    let revoked = false
+    const authority = makeRepositoryProductAuthority({
+      identity,
+      devices,
+      product: {
+        ...product,
+        threadAuthority: (_userId, threadId) =>
+          Effect.succeed(
+            threadId === "foreign"
+              ? { ...authorityProjection, ownerId: "other" }
+              : { ...authorityProjection, ownerId: "owner" },
+          ),
+      },
+      clientAuthority: clientAuthority((input) =>
+        !revoked && String(input.threadId) === "thread"
+          ? Effect.void
+          : Effect.fail(HostedPersistenceError.make({ reason: "invalid-authority", message: "denied" })),
+      ),
+      environment: "test",
+      binding: ({ ownerId, threadId }) =>
+        Effect.succeed({
+          ...canonicalBinding,
+          partition: threadPartition({ environment: "test", ownerId, threadId, target: "runner" }),
+        }),
+    })
+    const principal = yield* authority.authenticateBearer("token", { threadId: "thread" })
+    expect(principal).toBeDefined()
+    const run = { type: "run" as const, id: "opaque-run" }
+    const artifact = { type: "artifact" as const, id: "artifact-name" }
+    expect(
+      yield* authority.authorize({ principal: principal!, resource: run, action: "observe", threadId: "thread" }),
+    ).toBe(true)
+    expect(
+      yield* authority.authorize({ principal: principal!, resource: artifact, action: "observe", threadId: "other" }),
+    ).toBe(false)
+    expect(
+      yield* authority.authorize({ principal: principal!, resource: run, action: "observe", threadId: "foreign" }),
+    ).toBe(false)
+    revoked = true
+    expect(
+      yield* authority.authorize({ principal: principal!, resource: run, action: "observe", threadId: "thread" }),
+    ).toBe(false)
+  }),
+)

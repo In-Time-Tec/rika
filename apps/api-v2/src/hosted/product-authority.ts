@@ -48,6 +48,8 @@ export interface ProductAuthorityService extends ProductAuthentication {
     readonly principal: Principal
     readonly resource: Resource
     readonly action: "read" | "observe" | "mutate"
+    /** Explicit Thread routing context; it selects a partition but never proves ownership by itself. */
+    readonly threadId?: string
   }) => Effect.Effect<boolean, ProductAuthorizationError>
 }
 
@@ -80,7 +82,6 @@ export interface RepositoryProductAuthorityOptions {
 interface AuthenticatedActor {
   readonly identity: IdentityPrincipal
   readonly deviceId: string
-  readonly authority: ThreadAuthorityProjection
 }
 
 const unavailable = (message: string) => ProductAuthorizationError.make({ kind: "unavailable", message })
@@ -105,7 +106,7 @@ const generalistRole = (authority: ThreadAuthorityProjection, userId: string): P
     ? "controller"
     : "spectator"
 
-const actorFor = (input: AuthenticatedActor): ActorAttribution | undefined => {
+const actorFor = (input: AuthenticatedActor & { readonly authority: ThreadAuthorityProjection }): ActorAttribution | undefined => {
   const clientId = input.identity.clientId
   if (clientId === undefined) return undefined
   const userId = BetterAuthUserId.make(input.identity.userId)
@@ -146,6 +147,7 @@ export const makeRepositoryProductAuthority = (
   // Generalist decodes CurrentPrincipal before invoking Authorization, so object identity is not stable across the
   // middleware boundary. This bounded identity key carries no credential material and is stable for one client/device.
   const actors = new Map<string, AuthenticatedActor>()
+  const actorCapacity = 256
   const authenticateBearer: ProductAuthentication["authenticateBearer"] = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.authenticateBearer",
   )(function* (token, context) {
@@ -178,7 +180,12 @@ export const makeRepositoryProductAuthority = (
       tenantId: authority.ownerId,
       role: generalistRole(authority, identity.userId),
     }
-    actors.set(principal.id, { identity, deviceId, authority })
+    if (actors.has(principal.id)) actors.delete(principal.id)
+    actors.set(principal.id, { identity, deviceId })
+    if (actors.size > actorCapacity) {
+      const oldest = actors.keys().next().value
+      if (oldest !== undefined) actors.delete(oldest)
+    }
     return principal
   })
 
@@ -206,15 +213,19 @@ export const makeRepositoryProductAuthority = (
     "RikaApiV2.RepositoryProductAuthority.authorize",
   )(function* (input) {
     const actor = actors.get(input.principal.id)
-    const threadId = yield* resourceThread(input.resource)
+    const threadId = input.threadId ?? (yield* resourceThread(input.resource))
     if (actor === undefined || threadId === undefined) return false
-    if (actor.authority.ownerId !== input.principal.tenantId) return false
-    const attribution = actorFor(actor)
+    const authority = yield* options.product.threadAuthority(actor.identity.userId, threadId).pipe(
+      Effect.mapError((error) => unavailable(error.message)),
+      Effect.orElseSucceed(() => undefined),
+    )
+    if (authority === undefined || authority.ownerId !== input.principal.tenantId) return false
+    const attribution = actorFor({ ...actor, authority })
     if (attribution === undefined) return false
     const action: "thread:view" | "thread:operate" = input.action === "mutate" ? "thread:operate" : "thread:view"
     return yield* options.clientAuthority
       .authorizeThread({
-        ownerId: OwnerId.make(actor.authority.ownerId),
+        ownerId: OwnerId.make(authority.ownerId),
         threadId: ThreadId.make(threadId),
         actor: attribution,
         action,
@@ -234,9 +245,10 @@ export const authorizeResource = Effect.fn("RikaApiV2.ProductAuthority.authorize
     readonly principal: Principal
     readonly resource: Resource
     readonly action: "read" | "observe" | "mutate"
+    readonly threadId?: string
   },
 ) {
-  const threadId = yield* authority.resourceThread(input.resource)
+  const threadId = input.threadId ?? (yield* authority.resourceThread(input.resource))
   if (threadId === undefined) return false
   const binding = yield* authority.threadBinding(threadId, input.principal.tenantId)
   if (binding === undefined || binding.partition.ownerId !== input.principal.tenantId) return false

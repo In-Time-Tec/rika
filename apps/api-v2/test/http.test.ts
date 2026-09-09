@@ -80,3 +80,26 @@ it.effect("a revoked product grant blocks direct upstream Session routes", () =>
     expect(calls.handle).toBe(0)
   }),
 )
+
+it.effect("routes opaque Runs and child Sessions through an explicit Thread runtime prefix", () =>
+  Effect.gen(function* () {
+    const calls: Request[] = []
+    const response = yield* handleApiV2Request({
+      authority: authority(true),
+      gateway: {
+        ensureRootSession: () => Effect.succeed({ sessionId: partition.rootSessionId, created: true }),
+        handle: (_partition, forwarded) => {
+          calls.push(forwarded)
+          return Effect.succeed(new Response("upstream"))
+        },
+      },
+      environment: "test",
+      request: request("/api/v2/threads/thread/runtime/runs/opaque-run?cursor=abc&limit=2", { method: "GET" }),
+    })
+    expect(response.status).toBe(200)
+    expect(calls[0]?.url).toBe("https://rika.test/runs/opaque-run?cursor=abc&limit=2")
+    expect(calls[0]?.headers.get("x-rika-original-request-url")).toBe(
+      "https://rika.test/api/v2/threads/thread/runtime/runs/opaque-run?cursor=abc&limit=2",
+    )
+  }),
+)
