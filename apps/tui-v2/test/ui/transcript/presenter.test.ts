@@ -1,5 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { buildTranscriptGroups, toolPresentation } from "../../../src/ui/transcript/presenter"
+import { navigableIdsFor } from "../../../src/ui/transcript/navigation"
 import type { TranscriptItem } from "../../../src/client/model"
 
 it("uses the read action and source path instead of words and imports inside source content", () => {
@@ -30,4 +31,11 @@ it("keeps read and shell groups separate and retains command output", () => {
     expect(groups[1].items[0]?.command).toBe("bun run typecheck")
     expect(groups[1].items[0]?.output).toBe("Passed")
   }
+})
+
+it("keeps unloaded collaborators keyboard-navigable", () => {
+  const groups = buildTranscriptGroups([
+    { id: "child-session:retained", kind: "child", title: "retained", text: "", childSessionId: "retained" },
+  ])
+  expect(navigableIdsFor(groups, () => false)).toEqual(["child-session:retained"])
 })

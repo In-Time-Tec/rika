@@ -1,3 +1,4 @@
+/* oxlint-disable complexity -- hosted history transport wiring stays at the view boundary. */
 import { Show } from "solid-js"
 import type { AppProps, AppViewState } from "../app"
 import { Transcript } from "./transcript"
@@ -87,6 +88,12 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
                 focused={focus() === "transcript" && overlay() === undefined}
                 animate={props.animate !== false}
                 navigation={transcriptNavigation}
+                {...(props.client.loadOlder === undefined ? {} : { loadOlder: props.client.loadOlder })}
+                {...(props.client.openChildSession === undefined
+                  ? {}
+                  : { openChildSession: props.client.openChildSession })}
+                {...(props.client.backToThread === undefined ? {} : { backToThread: props.client.backToThread })}
+                focusedSessionId={props.client.state.focusedSessionId}
                 width={contentWidth()}
               />
             </box>

@@ -1,6 +1,7 @@
 /* oxlint-disable anti-slop/no-conditional-empty-object-spread -- protocol option fields must be omitted, not sent as undefined. */
 /* oxlint-disable anti-slop/no-chained-type-assertions -- the WebSocket adapter narrows an EventTarget proxy to the DOM socket surface. */
 /* oxlint-disable max-lines -- the client keeps its selection, projection, and transport lifecycle in one public value. */
+/* oxlint-disable complexity -- session event routing keeps cached root and focused child projections coherent. */
 /* oxlint-disable anti-slop/no-object-parameters -- external Generalist errors are decoded at this boundary. */
 /* oxlint-disable anti-slop/require-safety-comment-for-type-assertion -- queue conflict decoding establishes the invariant. */
 /* oxlint-disable typescript/no-unsafe-type-assertion -- mapped conflict reasons are validated before state publication. */
@@ -13,7 +14,15 @@ import { Effect, Exit, Fiber, Schema, Scope, Stream } from "effect"
 import * as Socket from "effect/unstable/socket/Socket"
 import type { ConnectionEvent, HostSessionSnapshot } from "generalist/server"
 import { makeExecutionClient, type ExecutionClient } from "./generalist"
-import { applyConnectionEvent, applyConnectionStatus, projectSnapshot, type ProjectionResult, type ProjectionState, type ProjectionThread } from "./projection"
+import {
+  applyConnectionEvent,
+  applyConnectionStatus,
+  projectSnapshot,
+  type FamilyProjection,
+  type ProjectionResult,
+  type ProjectionState,
+  type ProjectionThread,
+} from "./projection"
 import type { ProductClient, ThreadMetadata } from "./product"
 import { ProductClientError } from "./product"
 
@@ -23,7 +32,7 @@ const QueueConflict = Schema.Struct({
   hint: Schema.String,
 })
 
-export type QueueConflictReason = typeof QueueConflict.Type["reason"]
+export type QueueConflictReason = (typeof QueueConflict.Type)["reason"]
 
 export class ThreadClientError extends Schema.TaggedError<ThreadClientError>()("RikaClientV2ThreadError", {
   kind: Schema.Literals(["network", "protocol", "unauthorized", "forbidden", "conflict", "selection", "closed"]),
@@ -43,12 +52,15 @@ export interface ThreadClientState {
   readonly selectionEpoch: number
   readonly selectedThreadId: string | undefined
   readonly selectedSessionId: string | undefined
+  readonly focusedSessionId: string | undefined
   readonly threads: readonly ProjectionThread[]
   readonly projection: ProjectionState | undefined
   readonly connection: "connecting" | "connected" | "reconnecting" | "disconnected"
   readonly notice: string
   readonly lastReceipt: CommandReceipt | undefined
-  readonly lastConflict: { readonly commandId: string; readonly reason: QueueConflictReason; readonly message: string } | undefined
+  readonly lastConflict:
+    | { readonly commandId: string; readonly reason: QueueConflictReason; readonly message: string }
+    | undefined
 }
 
 export interface ThreadClient {
@@ -57,19 +69,34 @@ export interface ThreadClient {
   readonly refreshThreads: () => Effect.Effect<void, ThreadClientError>
   readonly selectThread: (threadId: string) => Effect.Effect<void, ThreadClientError>
   readonly submit: (prompt: string, commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
-  readonly editQueued: (id: string, prompt: string, commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
+  readonly editQueued: (
+    id: string,
+    prompt: string,
+    commandId?: string,
+  ) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly removeQueued: (id: string, commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
-  readonly steer: (prompt: string, commandId?: string, targetRunId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
+  readonly steer: (
+    prompt: string,
+    commandId?: string,
+    targetRunId?: string,
+  ) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly followUp: (
     prompt: string,
     childSessionId?: string,
     commandId?: string,
   ) => Effect.Effect<CommandReceipt, ThreadClientError>
-  readonly cancel: (commandId?: string, reason?: string, targetRunId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
+  readonly cancel: (
+    commandId?: string,
+    reason?: string,
+    targetRunId?: string,
+  ) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly stop: (commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly closeSession: (commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly resumeSession: (commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly loadOlder: (limit?: number) => Effect.Effect<void, ThreadClientError>
+  readonly loadMoreCollaborators: (limit?: number) => Effect.Effect<void, ThreadClientError>
+  readonly openChildSession: (sessionId: string) => Effect.Effect<void, ThreadClientError>
+  readonly backToThread: () => Effect.Effect<void, ThreadClientError>
   readonly dispose: Effect.Effect<void>
 }
 
@@ -91,15 +118,17 @@ export interface MakeThreadClientOptions {
     headers?: Readonly<Record<string, string>>,
   ) => globalThis.WebSocket
   /** Headers for the upgrade request, evaluated for each reconnect URL. */
-  readonly webSocketHeaders?: (
-    input: { readonly url: string; readonly method: "GET" },
-  ) => Effect.Effect<Readonly<Record<string, string>>, never>
+  readonly webSocketHeaders?: (input: {
+    readonly url: string
+    readonly method: "GET"
+  }) => Effect.Effect<Readonly<Record<string, string>>, never>
 }
 
 const initialState: ThreadClientState = {
   selectionEpoch: 0,
   selectedThreadId: undefined,
   selectedSessionId: undefined,
+  focusedSessionId: undefined,
   threads: [],
   projection: undefined,
   connection: "disconnected",
@@ -136,6 +165,28 @@ const mapError = (operation: string, error: ProductClientError | object): Thread
 }
 
 const commandId = (serial: number, operation: string): string => `tui-v2:${operation}:${serial}`
+
+type FamilyPage = {
+  readonly rootSessionId: string
+  readonly at: number
+  readonly sessions: readonly FamilyProjection["sessions"][number][]
+  readonly nextBefore: number | null
+}
+
+const familyProjection = (
+  page: FamilyPage,
+  previous?: FamilyProjection,
+  preserveAt = true,
+): FamilyProjection => {
+  const sessions = new Map((previous?.sessions ?? []).map((session) => [session.id, session]))
+  for (const session of page.sessions) sessions.set(session.id, session)
+  return {
+    rootSessionId: page.rootSessionId,
+    at: preserveAt ? (previous?.at ?? page.at) : page.at,
+    sessions: [...sessions.values()],
+    nextBefore: page.nextBefore,
+  }
+}
 
 const unavailableWebSocket: MakeThreadClientOptions["webSocketConstructor"] = () => {
   throw new Error("A WebSocket constructor is required for hosted Thread reconnect")
@@ -264,9 +315,24 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   let current: ThreadClientState = initialState
   let serial = 0
   let disposed = false
-  let connectionFiber: Fiber.Fiber<void, never> | undefined
+  const connectionFibers = new Map<string, Fiber.Fiber<void, never>>()
   const connectionScope = Scope.makeUnsafe()
   let selectedExecution = execution
+  let historyInFlight = false
+  let familyInFlight = false
+  let focusedSessionId: string | undefined
+  let childOpenSerial = 0
+  const connectedSessions = new Set<string>()
+  let rootFamily: FamilyProjection | undefined
+  const sessionProjections = new Map<
+    string,
+    { readonly execution: ExecutionClient; readonly projection: ProjectionState }
+  >()
+  let refreshFamily: (
+    selected: ExecutionClient,
+    rootSessionId: string,
+    epoch: number,
+  ) => Effect.Effect<void, ThreadClientError> = () => Effect.void
   const listeners = new Set<(state: ThreadClientState) => void>()
   const nextCommandId = (operation: string, provided: string | undefined): string => {
     if (provided !== undefined && provided.length > 0) return provided
@@ -281,6 +347,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const updateProjection = (projection: ProjectionState): void => {
     const selected = current.selectedThreadId
     const thread = projection.thread
+    sessionProjections.set(projection.sessionId, { execution: selectedExecution, projection })
     publish({
       ...current,
       projection,
@@ -294,55 +361,104 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const observeEvent = (event: ConnectionEvent, epoch: number): Effect.Effect<void> =>
     Effect.sync(() => {
       if (disposed || epoch !== current.selectionEpoch) return
-      const projection = current.projection
+      const eventSessionId = event._tag === "ConnectionSnapshot" ? event.snapshot.session.id : event.sessionId
+      const cached = sessionProjections.get(eventSessionId)
+      const projection =
+        cached?.projection ?? (current.projection?.sessionId === eventSessionId ? current.projection : undefined)
       if (projection === undefined) return
       const result = applyConnectionEvent(projection, event)
-      if (result._tag === "Rejected") publish({ ...current, projection: result.state, notice: result.reason })
-      else updateProjection(applyProjectionResult(result))
+      if (result._tag === "Rejected") {
+        sessionProjections.set(eventSessionId, {
+          execution: cached?.execution ?? selectedExecution,
+          projection: result.state,
+        })
+        if (current.projection?.sessionId === eventSessionId)
+          publish({ ...current, projection: result.state, notice: result.reason })
+      } else {
+        const next = applyProjectionResult(result)
+        sessionProjections.set(eventSessionId, { execution: cached?.execution ?? selectedExecution, projection: next })
+        if (current.projection?.sessionId === eventSessionId) updateProjection(next)
+      }
     })
-  const observeStatus = (status: Parameters<typeof applyConnectionStatus>[1], epoch: number): Effect.Effect<void> =>
-    Effect.sync(() => {
-      if (disposed || epoch !== current.selectionEpoch || current.projection === undefined) return
-      const next = applyConnectionStatus(current.projection, status)
-      let connectionState: ThreadClientState["connection"] = "connecting"
-      if (status._tag === "Connected") connectionState = "connected"
-      else if (status._tag === "Retrying") connectionState = "reconnecting"
-      else if (status._tag === "Disconnected") connectionState = "disconnected"
-      publish({
-        ...current,
-        projection: next,
-        connection: connectionState,
-        threads: current.threads.map((thread) => (thread.id === next.thread.id ? next.thread : thread)),
+  const observeStatus = (
+    status: Parameters<typeof applyConnectionStatus>[1],
+    epoch: number,
+    sessionId: string,
+  ): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      yield* Effect.sync(() => {
+        if (disposed || epoch !== current.selectionEpoch) return
+        const cached = sessionProjections.get(sessionId)
+        const projection = cached?.projection ?? (current.projection?.sessionId === sessionId ? current.projection : undefined)
+        const next = projection === undefined ? undefined : applyConnectionStatus(projection, status)
+        if (next !== undefined)
+          sessionProjections.set(sessionId, { execution: cached?.execution ?? selectedExecution, projection: next })
+        let connectionState: ThreadClientState["connection"] = "connecting"
+        if (status._tag === "Connected") connectionState = "connected"
+        else if (status._tag === "Retrying") connectionState = "reconnecting"
+        else if (status._tag === "Disconnected") connectionState = "disconnected"
+        publish({
+          ...current,
+          ...(current.projection?.sessionId === sessionId && next !== undefined ? { projection: next } : {}),
+          connection: connectionState,
+          ...(next === undefined || current.projection?.sessionId !== sessionId
+            ? {}
+            : { threads: current.threads.map((thread) => (thread.id === next.thread.id ? next.thread : thread)) }),
+        })
       })
+      if (
+        (status._tag !== "Retrying" && status._tag !== "Connected") ||
+        disposed ||
+        epoch !== current.selectionEpoch ||
+        rootFamily === undefined
+      )
+        return
+      const firstConnection = status._tag === "Connected" && connectedSessions.has(sessionId) === false
+      if (status._tag === "Connected") connectedSessions.add(sessionId)
+      if (firstConnection) return
+      yield* refreshFamily(selectedExecution, rootFamily.rootSessionId, epoch).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            if (disposed || epoch !== current.selectionEpoch) return
+            publish({ ...current, notice: mapError("session.family", error).message })
+          }),
+        ),
+      )
     })
-  const stopConnection = (): Effect.Effect<void> => {
-    if (connectionFiber === undefined) return Effect.void
-    const fiber = connectionFiber
-    connectionFiber = undefined
-    return Fiber.interrupt(fiber).pipe(Effect.asVoid)
+  const stopConnection = (sessionId?: string): Effect.Effect<void> => {
+    const fibers =
+      sessionId === undefined
+        ? [...connectionFibers.entries()]
+        : connectionFibers.has(sessionId)
+          ? [[sessionId, connectionFibers.get(sessionId)!] as const]
+          : []
+    if (fibers.length === 0) return Effect.void
+    for (const [id] of fibers) connectionFibers.delete(id)
+    return Effect.forEach(
+      fibers.map(([, fiber]) => fiber),
+      (fiber) => Fiber.interrupt(fiber),
+      { discard: true },
+    )
   }
   const runConnection = (selected: ExecutionClient, sessionId: string, epoch: number): Effect.Effect<void> =>
     Effect.scoped(
       Effect.gen(function* () {
         const connected = yield* selected.connect({ sessionId, eventCapacity: options.eventCapacity ?? 256 }).pipe(
-          Effect.provideService(
-            Socket.WebSocketConstructor,
-            (url, protocols) => {
-              const constructor = options.webSocketConstructor ?? unavailableWebSocket
-              if (options.webSocketHeaders === undefined) return constructor(url, protocols)
-              return authenticatedWebSocket({
-                url,
-                protocols,
-                constructor,
-                headers: options.webSocketHeaders({ url, method: "GET" }),
-              })
-            },
-          ),
+          Effect.provideService(Socket.WebSocketConstructor, (url, protocols) => {
+            const constructor = options.webSocketConstructor ?? unavailableWebSocket
+            if (options.webSocketHeaders === undefined) return constructor(url, protocols)
+            return authenticatedWebSocket({
+              url,
+              protocols,
+              constructor,
+              headers: options.webSocketHeaders({ url, method: "GET" }),
+            })
+          }),
         )
         yield* Effect.all(
           [
             connected.events.pipe(Stream.runForEach((event) => observeEvent(event, epoch))),
-            connected.status.pipe(Stream.runForEach((status) => observeStatus(status, epoch))),
+            connected.status.pipe(Stream.runForEach((status) => observeStatus(status, epoch, sessionId))),
           ],
           { concurrency: "unbounded" },
         )
@@ -362,13 +478,11 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       Effect.flatMap((fiber) =>
         Effect.sync(() => {
           if (!disposed && epoch === current.selectionEpoch) {
-            connectionFiber = fiber
+            connectionFibers.set(sessionId, fiber)
             return true
           }
           return false
-        }).pipe(
-          Effect.flatMap((owned) => (owned ? Effect.void : Fiber.interrupt(fiber).pipe(Effect.asVoid))),
-        ),
+        }).pipe(Effect.flatMap((owned) => (owned ? Effect.void : Fiber.interrupt(fiber).pipe(Effect.asVoid)))),
       ),
       Effect.asVoid,
     )
@@ -388,7 +502,8 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     current.selectionEpoch === selected.epoch && current.selectedSessionId === selected.sessionId
       ? Effect.void
       : staleSelection(operation)
-  const withReceipt = (receipt: CommandReceipt): void => publish({ ...current, lastReceipt: receipt, lastConflict: undefined })
+  const withReceipt = (receipt: CommandReceipt): void =>
+    publish({ ...current, lastReceipt: receipt, lastConflict: undefined })
   const failCommand = (operation: string, id: string, error: ProductClientError | object): ThreadClientError => {
     const mapped = mapError(operation, error)
     if (mapped.kind === "conflict" && mapped.reason !== undefined) {
@@ -404,11 +519,53 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     const page = yield* options.product.listThreads().pipe(Effect.mapError((error) => mapError("threads.list", error)))
     publish({ ...current, threads: page.threads.map(placeholderThread), notice: "" })
   })
+  refreshFamily = (selected, rootSessionId, epoch) => {
+    if (familyInFlight) return Effect.void
+    familyInFlight = true
+    return selected.family({ sessionId: rootSessionId, limit: 64 }).pipe(
+      Effect.mapError((error) => mapError("session.family", error)),
+      Effect.tap((value) =>
+        Effect.sync(() => {
+          if (disposed || epoch !== current.selectionEpoch) return
+            rootFamily = familyProjection(value, rootFamily, false)
+          for (const [sessionId, cached] of sessionProjections) {
+            const projection = projectSnapshot({
+              sessionId: cached.projection.sessionId,
+              threadId: cached.projection.thread.id,
+              snapshot: cached.projection.snapshot,
+              target: cached.projection.thread.target,
+              previousPreviews: cached.projection.previews,
+              previousPreviewFences: cached.projection.previewFences,
+              family: rootFamily,
+            })
+            sessionProjections.set(sessionId, { execution: cached.execution, projection })
+          }
+          if (
+            focusedSessionId !== undefined &&
+            rootFamily.sessions.some((session) => session.id === focusedSessionId) !== true
+          )
+            focusedSessionId = undefined
+          const activeSessionId = focusedSessionId ?? rootFamily.rootSessionId
+          const active = sessionProjections.get(activeSessionId)
+          if (active !== undefined) updateProjection(active.projection)
+          publish({ ...current, focusedSessionId, notice: "" })
+        }),
+      ),
+      Effect.ensuring(Effect.sync(() => (familyInFlight = false))),
+      Effect.asVoid,
+    )
+  }
   const selectThread = Effect.fn("RikaClientV2.selectThread")(function* (threadId: string) {
-    if (disposed) return yield* ThreadClientError.make({ kind: "closed", operation: "thread.select", message: "Client is closed" })
+    if (disposed)
+      return yield* ThreadClientError.make({ kind: "closed", operation: "thread.select", message: "Client is closed" })
     serial += 1
     const epoch = current.selectionEpoch + 1
     yield* stopConnection()
+    connectedSessions.clear()
+    childOpenSerial += 1
+    rootFamily = undefined
+    focusedSessionId = undefined
+    sessionProjections.clear()
     publish({
       ...current,
       selectionEpoch: epoch,
@@ -418,32 +575,46 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       connection: "connecting",
       notice: "Loading Thread…",
     })
-    const metadata = yield* options.product.thread(threadId).pipe(Effect.mapError((error) => mapError("thread.read", error)))
+    const metadata = yield* options.product
+      .thread(threadId)
+      .pipe(Effect.mapError((error) => mapError("thread.read", error)))
     if (epoch !== current.selectionEpoch) return
     const executionForSelection =
       options.executionForThread === undefined ? execution : yield* options.executionForThread(metadata)
-    const session = yield* options.product.ensureSession(threadId, nextCommandId("session", undefined)).pipe(Effect.mapError((error) => mapError("session.ensure", error)))
-    const snapshot = yield* executionForSelection.snapshot({ sessionId: session.sessionId }).pipe(Effect.mapError((error) => mapError("session.snapshot", error)))
+    const session = yield* options.product
+      .ensureSession(threadId, nextCommandId("session", undefined))
+      .pipe(Effect.mapError((error) => mapError("session.ensure", error)))
+    const snapshot = yield* executionForSelection
+      .snapshot({ sessionId: session.sessionId })
+      .pipe(Effect.mapError((error) => mapError("session.snapshot", error)))
+    const family = yield* executionForSelection
+      .family({ sessionId: session.sessionId, limit: 64 })
+      .pipe(Effect.mapError((error) => mapError("session.family", error)))
     if (epoch !== current.selectionEpoch) return
     selectedExecution = executionForSelection
+    rootFamily = familyProjection(family)
+    sessionProjections.clear()
     const projection = projectSnapshot({
       sessionId: session.sessionId,
       threadId,
       snapshot,
       target: options.targetForThread?.(metadata) ?? metadata.target,
+      family: rootFamily,
     })
+    sessionProjections.set(session.sessionId, { execution: executionForSelection, projection })
     updateProjection(projection)
-    publish({ ...current, connection: "connecting", notice: "" })
+    publish({ ...current, connection: "connecting", notice: "", focusedSessionId: undefined })
     yield* connectForSelection(executionForSelection, session.sessionId, epoch)
   })
   const submit = Effect.fn("RikaClientV2.submit")(function* (prompt: string, provided?: string) {
     const selected = selection()
-    if (selected === undefined) return yield* ThreadClientError.make({ kind: "selection", operation: "submit", message: "Select a Thread first" })
+    if (selected === undefined)
+      return yield* ThreadClientError.make({ kind: "selection", operation: "submit", message: "Select a Thread first" })
     const id = nextCommandId("submit", provided)
     const active = selected.projection.snapshot.session.activeRunId
-    const receipt = yield* selected.execution.submit({ sessionId: selected.sessionId, commandId: id, input: prompt }).pipe(
-      Effect.mapError((error) => failCommand("queue.submit", id, error)),
-    )
+    const receipt = yield* selected.execution
+      .submit({ sessionId: selected.sessionId, commandId: id, input: prompt })
+      .pipe(Effect.mapError((error) => failCommand("queue.submit", id, error)))
     yield* ensureSelection(selected, "queue.submit")
     const status: "active" | "queued" = active === undefined ? "active" : "queued"
     const value: CommandReceipt = { commandId: id, id: receipt.id, revision: receipt.revision, status }
@@ -454,11 +625,21 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     const selected = selection()
     const pending = selected?.projection.snapshot.session.queue.find((item) => item.id === id)
     if (selected === undefined || pending === undefined)
-      return yield* ThreadClientError.make({ kind: "selection", operation: "queue.edit", message: "Pending instruction is no longer loaded" })
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "queue.edit",
+        message: "Pending instruction is no longer loaded",
+      })
     const command = nextCommandId("queue-edit", provided)
-    const receipt = yield* selected.execution.updateInput({ sessionId: selected.sessionId, id, commandId: command, expectedRevision: pending.revision, input: prompt }).pipe(
-      Effect.mapError((error) => failCommand("queue.edit", command, error)),
-    )
+    const receipt = yield* selected.execution
+      .updateInput({
+        sessionId: selected.sessionId,
+        id,
+        commandId: command,
+        expectedRevision: pending.revision,
+        input: prompt,
+      })
+      .pipe(Effect.mapError((error) => failCommand("queue.edit", command, error)))
     yield* ensureSelection(selected, "queue.edit")
     const value = { commandId: command, id: receipt.id, revision: receipt.revision, status: "accepted" as const }
     withReceipt(value)
@@ -468,11 +649,15 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     const selected = selection()
     const pending = selected?.projection.snapshot.session.queue.find((item) => item.id === id)
     if (selected === undefined || pending === undefined)
-      return yield* ThreadClientError.make({ kind: "selection", operation: "queue.remove", message: "Pending instruction is no longer loaded" })
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "queue.remove",
+        message: "Pending instruction is no longer loaded",
+      })
     const command = nextCommandId("queue-remove", provided)
-    const receipt = yield* selected.execution.removeInput({ sessionId: selected.sessionId, id, commandId: command, expectedRevision: pending.revision }).pipe(
-      Effect.mapError((error) => failCommand("queue.remove", command, error)),
-    )
+    const receipt = yield* selected.execution
+      .removeInput({ sessionId: selected.sessionId, id, commandId: command, expectedRevision: pending.revision })
+      .pipe(Effect.mapError((error) => failCommand("queue.remove", command, error)))
     yield* ensureSelection(selected, "queue.remove")
     const value = { commandId: command, id: receipt.id, revision: receipt.revision, status: "accepted" as const }
     withReceipt(value)
@@ -481,22 +666,61 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const steer = Effect.fn("RikaClientV2.steer")(function* (prompt: string, provided?: string, targetRunId?: string) {
     const selected = selection()
     if (selected === undefined)
-      return yield* ThreadClientError.make({ kind: "selection", operation: "run.steer", message: "Select a Thread first" })
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "run.steer",
+        message: "Select a Thread first",
+      })
     const runId = activeRun(selected?.projection, targetRunId)
-    if (runId === undefined) return yield* ThreadClientError.make({ kind: "selection", operation: "run.steer", message: "No active Run is available" })
+    if (runId === undefined)
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "run.steer",
+        message: "No active Run is available",
+      })
     const command = nextCommandId("steer", provided)
-    yield* selected.execution.steer({ runId, commandId: command, input: prompt }).pipe(Effect.mapError((error) => failCommand("run.steer", command, error)))
+    yield* selected.execution
+      .steer({ runId, commandId: command, input: prompt })
+      .pipe(Effect.mapError((error) => failCommand("run.steer", command, error)))
     yield* ensureSelection(selected, "run.steer")
     const value = { commandId: command, status: "accepted" as const }
     withReceipt(value)
     return value
   })
-  const followUp = Effect.fn("RikaClientV2.followUp")(function* (prompt: string, childSessionId?: string, provided?: string) {
+  const followUp = Effect.fn("RikaClientV2.followUp")(function* (
+    prompt: string,
+    childSessionId?: string,
+    provided?: string,
+  ) {
     const selected = selection()
-    const sessionId = childSessionId ?? selected?.sessionId
-    if (sessionId === undefined || selected === undefined) return yield* ThreadClientError.make({ kind: "selection", operation: "follow-up", message: "No retained Session is selected" })
+    const requestedSessionId = childSessionId ?? focusedSessionId ?? selected?.sessionId
+    if (childSessionId !== undefined && childSessionId !== focusedSessionId)
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "follow-up",
+        message: "Open that collaborator before sending a follow-up",
+      })
+    if (
+      requestedSessionId !== undefined &&
+      requestedSessionId !== selected?.sessionId &&
+      rootFamily?.sessions.some((session) => session.id === requestedSessionId) !== true
+    )
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "follow-up",
+        message: "Collaborator is not available",
+      })
+    const sessionId = requestedSessionId
+    if (sessionId === undefined || selected === undefined)
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "follow-up",
+        message: "No retained Session is selected",
+      })
     const command = nextCommandId("follow-up", provided)
-    const receipt = yield* selected.execution.submit({ sessionId, commandId: command, input: prompt }).pipe(Effect.mapError((error) => failCommand("follow-up", command, error)))
+    const receipt = yield* selected.execution
+      .submit({ sessionId, commandId: command, input: prompt })
+      .pipe(Effect.mapError((error) => failCommand("follow-up", command, error)))
     yield* ensureSelection(selected, "follow-up")
     const value = { commandId: command, id: receipt.id, revision: receipt.revision, status: "accepted" as const }
     withReceipt(value)
@@ -505,11 +729,22 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const cancel = Effect.fn("RikaClientV2.cancel")(function* (provided?: string, reason?: string, targetRunId?: string) {
     const selected = selection()
     if (selected === undefined)
-      return yield* ThreadClientError.make({ kind: "selection", operation: "run.cancel", message: "Select a Thread first" })
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "run.cancel",
+        message: "Select a Thread first",
+      })
     const runId = activeRun(selected?.projection, targetRunId)
-    if (runId === undefined) return yield* ThreadClientError.make({ kind: "selection", operation: "run.cancel", message: "No active Run is available" })
+    if (runId === undefined)
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "run.cancel",
+        message: "No active Run is available",
+      })
     const command = nextCommandId("cancel", provided)
-    yield* selected.execution.cancel({ runId, commandId: command, ...(reason === undefined ? {} : { reason }) }).pipe(Effect.mapError((error) => failCommand("run.cancel", command, error)))
+    yield* selected.execution
+      .cancel({ runId, commandId: command, ...(reason === undefined ? {} : { reason }) })
+      .pipe(Effect.mapError((error) => failCommand("run.cancel", command, error)))
     yield* ensureSelection(selected, "run.cancel")
     const value = { commandId: command, status: "accepted" as const }
     withReceipt(value)
@@ -518,54 +753,164 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const control = (action: "stop" | "close" | "resume", operation: string, provided?: string) =>
     Effect.fn(`RikaClientV2.${operation}`)(function* () {
       const selected = selection()
-      if (selected === undefined) return yield* ThreadClientError.make({ kind: "selection", operation, message: "Select a Thread first" })
+      if (selected === undefined)
+        return yield* ThreadClientError.make({ kind: "selection", operation, message: "Select a Thread first" })
       const command = nextCommandId(operation, provided)
-      yield* selected.execution.control({ sessionId: selected.sessionId, commandId: command, action }).pipe(Effect.mapError((error) => failCommand(operation, command, error)))
+      yield* selected.execution
+        .control({ sessionId: selected.sessionId, commandId: command, action })
+        .pipe(Effect.mapError((error) => failCommand(operation, command, error)))
       yield* ensureSelection(selected, operation)
       const value = { commandId: command, status: "accepted" as const }
       withReceipt(value)
       return value
     })
-  const loadOlder = Effect.fn("RikaClientV2.loadOlder")(function* (limit = options.historyPageSize ?? 250) {
-    const selected = selection()
-    if (selected === undefined || selected.projection.snapshot.conversation.leafId === null) return
-    const projection = selected.projection
-    const page = yield* selected.execution.history({
-      sessionId: selected.sessionId,
-      leafId: projection.snapshot.conversation.nextLeafId ?? projection.snapshot.conversation.leafId,
+  const loadMoreCollaborators = Effect.fn("RikaClientV2.loadMoreCollaborators")(function* (limit = 64) {
+    if (familyInFlight || rootFamily?.nextBefore === null || rootFamily === undefined) return
+    const root = sessionProjections.get(rootFamily.rootSessionId)
+    if (root === undefined) return yield* staleSelection("session.family")
+    const epoch = current.selectionEpoch
+    const page = root.execution.family({
+      sessionId: rootFamily.rootSessionId,
+      at: rootFamily.at,
+      before: rootFamily.nextBefore,
       limit,
-    }).pipe(
-      Effect.mapError((error) => mapError("session.history", error)),
+    })
+    familyInFlight = true
+    return yield* page.pipe(
+      Effect.mapError((error) => mapError("session.family", error)),
+      Effect.tap((value) =>
+        Effect.sync(() => {
+          if (disposed || epoch !== current.selectionEpoch || rootFamily === undefined) return
+          rootFamily = familyProjection(value, rootFamily)
+          const cached = sessionProjections.get(rootFamily.rootSessionId)
+          if (cached === undefined) return
+          const projection = projectSnapshot({
+            sessionId: cached.projection.sessionId,
+            threadId: cached.projection.thread.id,
+            snapshot: cached.projection.snapshot,
+            target: cached.projection.thread.target,
+            previousPreviews: cached.projection.previews,
+            previousPreviewFences: cached.projection.previewFences,
+            family: rootFamily,
+          })
+          sessionProjections.set(cached.projection.sessionId, { execution: cached.execution, projection })
+          if (focusedSessionId === undefined) updateProjection(projection)
+        }),
+      ),
+      Effect.ensuring(Effect.sync(() => (familyInFlight = false))),
+      Effect.asVoid,
     )
-    yield* ensureSelection(selected, "session.history")
-    if (page.entries.length === 0) return
-    const known = new Set(projection.snapshot.conversation.entries.map((entry) => entry.id))
-    const entries = [
-      ...page.entries.filter((entry) => !known.has(entry.id)),
-      ...projection.snapshot.conversation.entries,
-    ]
-    const conversation =
-      page.nextLeafId === null
-        ? { leafId: page.leafId, entries }
-        : { ...projection.snapshot.conversation, entries, leafId: page.leafId, nextLeafId: page.nextLeafId }
-    const snapshot: HostSessionSnapshot = {
-      ...projection.snapshot,
-      conversation,
-    }
-    updateProjection(
+  })
+  const openChildSession = Effect.fn("RikaClientV2.openChildSession")(function* (sessionId: string) {
+    if (disposed)
+      return yield* ThreadClientError.make({ kind: "closed", operation: "session.open", message: "Client is closed" })
+    const family = rootFamily
+    const retained = family?.sessions.find((session) => session.id === sessionId)
+    if (family === undefined || retained === undefined || family.rootSessionId === sessionId)
+      return yield* ThreadClientError.make({
+        kind: "selection",
+        operation: "session.open",
+        message: "Collaborator is not available",
+      })
+    const root = sessionProjections.get(family.rootSessionId)
+    if (root === undefined) return yield* staleSelection("session.open")
+    const epoch = current.selectionEpoch
+    const openSerial = ++childOpenSerial
+    const cached = sessionProjections.get(sessionId)
+    const projection = cached?.projection ??
       projectSnapshot({
-        sessionId: projection.sessionId,
-        threadId: projection.thread.id,
-        snapshot,
-        target: projection.thread.target,
-        previousPreviews: projection.previews,
-        previousPreviewFences: projection.previewFences,
-      }),
+        sessionId,
+        threadId: root.projection.thread.id,
+        snapshot: yield* root.execution
+          .snapshot({ sessionId })
+          .pipe(Effect.mapError((error) => mapError("session.snapshot", error))),
+        target: root.projection.thread.target,
+        family,
+      })
+    if (
+      disposed ||
+      epoch !== current.selectionEpoch ||
+      openSerial !== childOpenSerial ||
+      rootFamily !== family ||
+      current.selectedThreadId !== root.projection.thread.id
     )
+      return yield* staleSelection("session.open")
+    const previousFocusedSessionId = focusedSessionId
+    if (previousFocusedSessionId !== undefined && previousFocusedSessionId !== sessionId) {
+      yield* stopConnection(previousFocusedSessionId)
+      connectedSessions.delete(previousFocusedSessionId)
+    }
+    sessionProjections.set(sessionId, { execution: root.execution, projection })
+    focusedSessionId = sessionId
+    updateProjection(projection)
+    publish({ ...current, focusedSessionId: sessionId, notice: "" })
+    yield* connectForSelection(root.execution, sessionId, epoch)
+  })
+  const backToThread = Effect.fn("RikaClientV2.backToThread")(function* () {
+    if (focusedSessionId === undefined) return
+    const previousFocusedSessionId = focusedSessionId
+    childOpenSerial += 1
+    yield* stopConnection(previousFocusedSessionId)
+    connectedSessions.delete(previousFocusedSessionId)
+    const rootSessionId = rootFamily?.rootSessionId
+    const root = rootSessionId === undefined ? undefined : sessionProjections.get(rootSessionId)
+    if (root === undefined) return yield* staleSelection("session.back")
+    focusedSessionId = undefined
+    updateProjection(root.projection)
+    publish({ ...current, focusedSessionId: undefined, notice: "" })
+  })
+  const loadOlder = Effect.fn("RikaClientV2.loadOlder")(function* (limit = options.historyPageSize ?? 250) {
+    if (historyInFlight) return
+    const selected = selection()
+    const nextLeafId = selected?.projection.snapshot.conversation.nextLeafId
+    if (selected === undefined || nextLeafId === undefined) return
+    historyInFlight = true
+    return yield* Effect.gen(function* () {
+      const page = yield* selected.execution
+        .history({
+          sessionId: selected.sessionId,
+          leafId: nextLeafId,
+          limit,
+        })
+        .pipe(Effect.mapError((error) => mapError("session.history", error)))
+      yield* ensureSelection(selected, "session.history")
+      const currentProjection = current.projection
+      if (currentProjection === undefined || currentProjection.sessionId !== selected.sessionId)
+        return yield* staleSelection("session.history")
+      const currentConversation = currentProjection.snapshot.conversation
+      if (currentConversation.nextLeafId !== nextLeafId || page.leafId !== nextLeafId)
+        return yield* staleSelection("session.history")
+      const known = new Set(currentConversation.entries.map((entry) => entry.id))
+      const entries = [...page.entries.filter((entry) => !known.has(entry.id)), ...currentConversation.entries]
+      const conversationWithoutCursor = {
+        leafId: currentConversation.leafId,
+        entries: currentConversation.entries,
+      }
+      const conversation =
+        page.nextLeafId === null
+          ? { ...conversationWithoutCursor, entries }
+          : { ...currentConversation, entries, nextLeafId: page.nextLeafId }
+      const snapshot: HostSessionSnapshot = {
+        ...currentProjection.snapshot,
+        conversation,
+      }
+      updateProjection(
+        projectSnapshot({
+          sessionId: currentProjection.sessionId,
+          threadId: currentProjection.thread.id,
+          snapshot,
+          target: currentProjection.thread.target,
+          previousPreviews: currentProjection.previews,
+          previousPreviewFences: currentProjection.previewFences,
+          family: rootFamily,
+        }),
+      )
+    }).pipe(Effect.ensuring(Effect.sync(() => (historyInFlight = false))))
   })
   const dispose = Effect.sync(() => {
     if (disposed) return
     disposed = true
+    childOpenSerial += 1
     listeners.clear()
   }).pipe(Effect.andThen(Effect.suspend(stopConnection)), Effect.andThen(Scope.close(connectionScope, Exit.void)))
   return {
@@ -588,9 +933,15 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     closeSession: control("close", "session.close"),
     resumeSession: control("resume", "session.resume"),
     loadOlder,
+    loadMoreCollaborators,
+    openChildSession,
+    backToThread,
     dispose,
   }
 }
 
-export const makeThreadClientFromGeneralist = (options: Omit<MakeThreadClientOptions, "execution"> & { readonly generalist: Parameters<typeof makeExecutionClient>[0] }) =>
-  makeThreadClient({ ...options, execution: makeExecutionClient(options.generalist) })
+export const makeThreadClientFromGeneralist = (
+  options: Omit<MakeThreadClientOptions, "execution"> & {
+    readonly generalist: Parameters<typeof makeExecutionClient>[0]
+  },
+) => makeThreadClient({ ...options, execution: makeExecutionClient(options.generalist) })

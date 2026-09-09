@@ -83,7 +83,7 @@ export const navigableIdsFor: {
       continue
     }
     if (group.kind === "children") {
-      for (const item of group.items) if (item.text.trim().length > 0) ids.push(item.id)
+      for (const item of group.items) if (item.text.trim().length > 0 || item.childSessionId !== undefined) ids.push(item.id)
       continue
     }
     if (!toolExpandable(group.items)) continue

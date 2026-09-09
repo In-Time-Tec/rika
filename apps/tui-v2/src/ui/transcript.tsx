@@ -1,3 +1,4 @@
+/* oxlint-disable complexity -- keyboard paging keeps local virtualization and hosted history in one boundary. */
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { CliRenderEvents, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { Effect, Schedule } from "effect"
@@ -29,6 +30,10 @@ export interface TranscriptProps {
   readonly focused?: boolean
   readonly animate?: boolean
   readonly navigation?: Accessor<TranscriptNavigation | undefined>
+  readonly loadOlder?: () => void
+  readonly openChildSession?: (sessionId: string) => void
+  readonly backToThread?: () => void
+  readonly focusedSessionId?: string | undefined
   readonly width?: number
 }
 
@@ -98,7 +103,13 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
     if (previous.start === window().start && previous.end === window().end) applyWindowScroll()
     renderer.requestRender()
   }
-  const showEarlier = () => showWindow(Math.max(0, window().start - transcriptWindowSize), "bottom")
+  const showEarlier = () => {
+    if (window().start === 0) {
+      props.loadOlder?.()
+      return
+    }
+    showWindow(Math.max(0, window().start - transcriptWindowSize), "bottom")
+  }
   const showNewer = () => {
     const start = window().end
     showWindow(start + transcriptWindowSize >= groups().length ? undefined : start, "top")
@@ -174,12 +185,31 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
     if (!focused() || scroll === undefined || event.eventType === "release" || event.defaultPrevented) return
     const key = event.name.toLowerCase().replace(/[ _-]/g, "")
     if (key === "home") {
+      if (window().start === 0) props.loadOlder?.()
       showWindow(0, "top")
       event.preventDefault()
       return
     }
+    if ((key === "escape" || key === "esc") && props.focusedSessionId !== undefined) {
+      props.backToThread?.()
+      event.preventDefault()
+      return
+    }
+    if (key === "enter" || key === "return") {
+      const selected = props.items.find((item) => item.id === selectedId())
+      if (selected?.childSessionId !== undefined) {
+        props.openChildSession?.(selected.childSessionId)
+        event.preventDefault()
+        return
+      }
+    }
     if (["pageup", "up", "arrowup"].includes(key) && scroll.scrollTop <= 0 && window().earlier > 0) {
       showEarlier()
+      event.preventDefault()
+      return
+    }
+    if (["pageup", "up", "arrowup"].includes(key) && scroll.scrollTop <= 0 && window().start === 0) {
+      props.loadOlder?.()
       event.preventDefault()
       return
     }
@@ -203,6 +233,18 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
   return (
     <TranscriptWidth.Provider value={() => props.width ?? dimensions().width}>
       <AnimationViewport.Provider value={() => scroll}>
+        <Show when={props.focusedSessionId !== undefined}>
+          <text
+            id="transcript-back-to-thread"
+            height={1}
+            flexShrink={0}
+            fg={colors.muted}
+            selectable={false}
+            onMouseDown={() => props.backToThread?.()}
+          >
+            {"← Back to Thread (Esc)"}
+          </text>
+        </Show>
         <scrollbox
           ref={(value: ScrollBoxRenderable) => {
             scroll = value
@@ -252,6 +294,7 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
                   toggle={toggle}
                   selected={selectedId}
                   select={setSelectedId}
+                  open={(sessionId) => props.openChildSession?.(sessionId)}
                 />
               </box>
             )}

@@ -12,6 +12,7 @@ import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import * as HttpServer from "effect/unstable/http/HttpServer"
 import { Prompt } from "effect/unstable/ai"
 import { ExecutableManifest } from "generalist"
+import type { SessionFamilyPage } from "generalist/host"
 import * as Runtime from "generalist/runtime"
 import { Server } from "generalist/server"
 import { makeGeneralistClient, type ExecutionClient } from "../src/generalist"
@@ -37,7 +38,7 @@ interface FixtureSession {
   readonly selection: FixturePending["selection"]
 }
 
-const makeFixture = () => {
+const makeFixture = (familyPage: SessionFamilyPage = { rootSessionId: "session", at: 0, sessions: [], nextBefore: null }) => {
   let session: FixtureSession = {
     id: "session",
     title: "Server fixture",
@@ -110,11 +111,12 @@ const makeFixture = () => {
       create: () => Effect.succeed(handle),
       get: () => Effect.succeed(handle),
       list: Effect.sync(() => [session]),
-      snapshot: (sessionId: string) => (sessionId === session.id ? Effect.succeed(snapshot()) : Effect.die("missing session")),
+      snapshot: (sessionId: string) =>
+        sessionId === session.id ? Effect.succeed(snapshot()) : Effect.die("missing session"),
       history: () => Effect.succeed({ leafId: null, entries: [], nextLeafId: null }),
       runs: () => Effect.succeed({ at: 0, runs: [], nextBefore: null }),
       run: () => Effect.die("run endpoint is not used by this fixture"),
-      family: () => Effect.succeed({ rootSessionId: session.id, at: 0, sessions: [], nextBefore: null }),
+      family: () => Effect.succeed({ ...familyPage, rootSessionId: session.id }),
       entry: () => Effect.die("entry endpoint is not used by this fixture"),
     },
     runs: {},
@@ -147,7 +149,7 @@ const makeFixture = () => {
         Effect.promise(() => web.handler(webRequest)),
       ),
       Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
-    )
+    ),
   )
   const authenticated = HttpClient.mapRequest(transport, (request) =>
     HttpClientRequest.setHeader(request, "authorization", "Bearer client-v2-token"),
@@ -224,6 +226,47 @@ it.effect("exposes the released client through the execution adapter", () => {
       } satisfies ExecutionClient
       const receipt = yield* execution.submit({ sessionId: "session", commandId: "adapter", input: "through adapter" })
       expect(receipt.id).toBe("pending-1")
+    }).pipe(Effect.ensuring(Effect.sync(fixture.dispose))),
+  )
+})
+
+it.effect("decodes a retained child whose initial Run is outside the root snapshot", () => {
+  const fixture = makeFixture({
+    rootSessionId: "session",
+    at: 17,
+    sessions: [
+      {
+        id: "retained-child",
+        rootSessionId: "session",
+        parentSessionId: "session",
+        parentRunId: "root-run",
+        initialRunId: "child-run-outside-snapshot",
+        depth: 1,
+      },
+    ],
+    nextBefore: null,
+  })
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const client = yield* fixture.makeClient()
+      const root = yield* client.sessions.snapshot({ sessionId: "session" })
+      const family = yield* client.sessions.family({ sessionId: "session", limit: 64 })
+      expect(root.runs.some((run) => run.runId === "child-run-outside-snapshot")).toBe(false)
+      expect(family).toEqual({
+        rootSessionId: "session",
+        at: 17,
+        sessions: [
+          {
+            id: "retained-child",
+            rootSessionId: "session",
+            parentSessionId: "session",
+            parentRunId: "root-run",
+            initialRunId: "child-run-outside-snapshot",
+            depth: 1,
+          },
+        ],
+        nextBefore: null,
+      })
     }).pipe(Effect.ensuring(Effect.sync(fixture.dispose))),
   )
 })

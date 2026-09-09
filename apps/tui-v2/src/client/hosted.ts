@@ -23,6 +23,7 @@ const hostedState = (): StoreState => ({
   mode: "medium",
   connection: "reconnecting",
   notice: "Connecting to hosted Rika…",
+  focusedSessionId: undefined,
 })
 
 const toThread = (thread: ReturnType<typeof makeThreadClient>["state"]["threads"][number]): StoreThread => ({
@@ -46,7 +47,8 @@ const toThread = (thread: ReturnType<typeof makeThreadClient>["state"]["threads"
   approval: thread.approval,
 })
 
-const connectionFor = (value: ReturnType<typeof makeThreadClient>["state"]["connection"]): ClientState["connection"] => value
+const connectionFor = (value: ReturnType<typeof makeThreadClient>["state"]["connection"]): ClientState["connection"] =>
+  value
 
 const errorText = (error: ThreadClientError): string => `${error.operation}: ${error.message}`
 
@@ -73,6 +75,7 @@ export const createHostedClient = (options: CreateHostedClientOptions): Client =
       threads,
       connection: connectionFor(value.connection),
       notice: value.notice,
+      focusedSessionId: value.focusedSessionId,
     })
   }
   const unsubscribe = threadClient.subscribe(sync)
@@ -93,7 +96,8 @@ export const createHostedClient = (options: CreateHostedClientOptions): Client =
   const selectedPending = (id: string) => selected()?.pending.find((pending) => pending.id === id)
   const client: Client = {
     state,
-    loadScenario: (scenario: ScenarioId) => setState("notice", `Hosted client does not load offline scenario ${scenario}`),
+    loadScenario: (scenario: ScenarioId) =>
+      setState("notice", `Hosted client does not load offline scenario ${scenario}`),
     selectThread: (threadId) => run(threadClient.selectThread(threadId)),
     newThread: (_target?: "runner" | "orb") => setState("notice", "Create Thread from the hosted product surface"),
     archiveThread: () => setState("notice", "Archive Thread from the hosted product surface"),
@@ -109,17 +113,16 @@ export const createHostedClient = (options: CreateHostedClientOptions): Client =
     cancel: () => run(threadClient.cancel()),
     stop: () => run(threadClient.stop()),
     followUp: (prompt, childSessionId) => run(threadClient.followUp(prompt, childSessionId)),
+    loadOlder: () => run(threadClient.loadOlder()),
+    openChildSession: (sessionId) => run(threadClient.openChildSession(sessionId)),
+    backToThread: () => run(threadClient.backToThread()),
     approve: (_approved: boolean) => setState("notice", "Authorization controls are provided by the hosted Run"),
     editPending: (id, prompt) => run(threadClient.editQueued(id, prompt)),
     removePending: (id) => run(threadClient.removeQueued(id)),
     steerPending: (id) => {
       const pending = selectedPending(id)
       if (pending === undefined) return
-      run(
-        threadClient.steer(pending.prompt).pipe(
-          Effect.andThen(threadClient.removeQueued(id)),
-        ),
-      )
+      run(threadClient.steer(pending.prompt).pipe(Effect.andThen(threadClient.removeQueued(id))))
     },
     interruptAndSend: (prompt, images = []) => {
       const text = prompt.trim()

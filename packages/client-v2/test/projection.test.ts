@@ -172,3 +172,60 @@ it("keeps preview authority fences across replacement snapshots", () => {
   const accepted = applyConnectionEvent(reconnected.state, newer)
   expect(accepted._tag).toBe("Applied")
 })
+
+it("uses retained Session ids for loaded and unloaded collaborators", () => {
+  const withChildRun = Schema.decodeSync(Server.SessionSnapshot)({
+    ...snapshot,
+    runs: [
+      {
+        runId: "child-run",
+        rootRunId: "child-run",
+        parentRunId: "parent-run",
+        status: "succeeded",
+        cursor: 1,
+        turn: 1,
+      },
+    ],
+  })
+  const family = {
+    rootSessionId: "session",
+    at: 17,
+    sessions: [
+      {
+        id: "loaded-child",
+        rootSessionId: "session",
+        parentSessionId: "session",
+        parentRunId: "parent-run",
+        initialRunId: "child-run",
+        depth: 1,
+      },
+      {
+        id: "unloaded-child",
+        rootSessionId: "session",
+        parentSessionId: "session",
+        parentRunId: "parent-run-2",
+        initialRunId: "missing-run",
+        depth: 1,
+      },
+    ],
+    nextBefore: 3,
+  } as const
+  const projection = projectSnapshot({ sessionId: "session", snapshot: withChildRun, family })
+  expect(projection.thread.items.filter((item) => item.kind === "child")).toEqual([
+    {
+      id: "child-session:loaded-child",
+      kind: "child",
+      title: "loaded-child",
+      text: "succeeded",
+      status: "idle",
+      childSessionId: "loaded-child",
+    },
+    {
+      id: "child-session:unloaded-child",
+      kind: "child",
+      title: "unloaded-child",
+      text: "",
+      childSessionId: "unloaded-child",
+    },
+  ])
+})
