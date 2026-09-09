@@ -3,7 +3,7 @@ import { expect } from "vitest"
 import { it } from "@effect/vitest"
 import type { Principal } from "generalist/server"
 import { authorizedRuntimeRequest, type RuntimeGateway } from "../src/hosted/runtime-gateway"
-import { threadPartition, type ThreadExecutionBinding } from "../src/hosted/partition"
+import { decodeWorkspaceBinding, threadPartition, type ThreadExecutionBinding } from "../src/hosted/partition"
 import type { ProductAuthorityService } from "../src/hosted/product-authority"
 
 const principal: Principal = { id: "user", tenantId: "owner", role: "controller" }
@@ -11,6 +11,14 @@ const partition = threadPartition({ environment: "test", ownerId: "owner", threa
 const binding: ThreadExecutionBinding = {
   partition,
   placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+  workspaceBinding: decodeWorkspaceBinding({
+    workspaceId: "workspace",
+    assignmentId: "assignment",
+    generation: 1,
+    placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+    buildId: "build",
+    protocolVersion: 1,
+  }),
 }
 
 const authority = (allowed: boolean): ProductAuthorityService => ({

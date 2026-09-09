@@ -1,5 +1,6 @@
 /* oxlint-disable anti-slop-effect/no-service-constructor-imports -- this explicit host is the application composition root. */
 /* oxlint-disable effecttsgo/async-function -- the host exposes the platform Fetch contract. */
+/* oxlint-disable effecttsgo/global-timers -- shutdown deadlines bridge the foreign host lifecycle. */
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-chained-type-assertions, anti-slop/require-safety-comment-for-type-assertion */
 import { Effect, Schema } from "effect"
 import type { ApiV2ApplicationOptions, ApiV2ApplicationService } from "./application"
@@ -62,13 +63,81 @@ const isRivetRequest = (request: Request) => {
   return pathname === "/api/rivet" || pathname.startsWith("/api/rivet/")
 }
 
-// ast-grep-ignore: effect-prefer-effect-signatures -- this helper tracks a foreign Fetch promise lifecycle.
-const track = <A>(active: Set<Promise<unknown>>, operation: Promise<A>) => {
-  // ast-grep-ignore: effect-prefer-promise-composition -- this helper tracks a foreign Fetch promise lifecycle.
+const shutdownDeadlineMillis = 250
+
+interface ActiveApplicationRequest {
+  // ast-grep-ignore: effect-prefer-effect-signatures -- this interface is a foreign Fetch lifecycle adapter.
+  readonly complete: Promise<void>
+  // ast-grep-ignore: effect-prefer-effect-signatures -- this interface is a foreign Fetch lifecycle adapter.
+  readonly abort: () => Promise<void>
+}
+
+const waitFor = (durationMillis: number) =>
+  // oxlint-disable-next-line effecttsgo/new-promise -- this timer bridges the foreign host lifecycle boundary.
+  new Promise<void>((resolve) => {
+    // ast-grep-ignore: effect-prefer-scheduling -- this timer bounds a foreign transport shutdown.
+    setTimeout(resolve, durationMillis)
+  })
+
+// ast-grep-ignore: effect-prefer-effect-signatures -- this helper is a foreign Fetch lifecycle adapter.
+const bounded = async <A>(operation: Promise<A>, durationMillis: number) => {
+  // oxlint-disable-next-line effecttsgo/promise-composition -- shutdown races foreign transport cleanup against a deadline.
+  // ast-grep-ignore: effect-prefer-promise-composition -- shutdown races foreign transport cleanup against a deadline.
+  await Promise.race([operation, waitFor(durationMillis)])
+}
+
+// ast-grep-ignore: effect-prefer-effect-signatures -- this helper tracks a foreign Fetch response body lifecycle.
+const trackResponse = (active: Set<Promise<unknown>>, operation: Promise<Response>) => {
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper tracks a foreign Fetch response lifecycle.
   const tracked = operation.then(
-    (value) => {
+    (response) => {
       active.delete(tracked)
-      return value
+      if (response.body === null) return response
+      if (response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") !== true) return response
+      const reader = response.body.getReader()
+      let resolveDone: (() => void) | undefined
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        resolveDone?.()
+      }
+      // oxlint-disable-next-line effecttsgo/new-promise -- Fetch body lifetime needs a foreign stream completion promise.
+      const bodyDone = new Promise<void>((resolve) => {
+        resolveDone = resolve
+      })
+      const body = new ReadableStream<Uint8Array>({
+        // ast-grep-ignore: effect-prefer-program-construction -- ReadableStream pull is a foreign stream callback.
+        async pull(controller) {
+          try {
+            const result = await reader.read()
+            if (result.done) {
+              controller.close()
+              finish()
+            // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-type-assertion -- Bun's ReadableStream reader widens its chunk type.
+            } else controller.enqueue(result.value as Uint8Array)
+          } catch (error) {
+            controller.error(error)
+            finish()
+          }
+        },
+        // ast-grep-ignore: effect-prefer-program-construction -- ReadableStream cancel is a foreign stream callback.
+        async cancel(reason) {
+          try {
+            await reader.cancel(reason)
+          } finally {
+            finish()
+          }
+        },
+      })
+      // ast-grep-ignore: effect-prefer-promise-composition -- this helper tracks a foreign Fetch response body.
+      bodyDone.finally(() => active.delete(bodyDone)).catch(() => undefined)
+      active.add(bodyDone)
+      return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      })
     },
     (error) => {
       active.delete(tracked)
@@ -79,10 +148,124 @@ const track = <A>(active: Set<Promise<unknown>>, operation: Promise<A>) => {
   return tracked
 }
 
+const trackApplicationResponse = (
+  active: Set<ActiveApplicationRequest>,
+  // ast-grep-ignore: effect-prefer-effect-signatures -- this argument is a foreign Fetch lifecycle adapter.
+  operation: Promise<Response>,
+  websocket: RuntimeWebSocket | undefined,
+) => {
+  let resolveComplete: (() => void) | undefined
+  // ast-grep-ignore: effect-prefer-promise-composition -- this callback is a foreign Fetch lifecycle adapter.
+  let abort = () => Promise.resolve()
+  // oxlint-disable-next-line effecttsgo/new-promise -- this completion bridge tracks a foreign Fetch lifecycle.
+  const complete = new Promise<void>((resolve) => {
+    resolveComplete = resolve
+  })
+  const request: ActiveApplicationRequest = {
+    complete,
+    abort: () => abort(),
+  }
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper removes a foreign request after lifecycle close.
+  complete.finally(() => active.delete(request)).catch(() => undefined)
+  active.add(request)
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper tracks a foreign Fetch response lifecycle.
+  const tracked = operation.then(
+    (response) => {
+      if (response.status === 101 && websocket !== undefined) {
+        let resolveSocket: (() => void) | undefined
+        // oxlint-disable-next-line effecttsgo/new-promise -- this close bridge tracks a foreign WebSocket lifecycle.
+        const socketClosed = new Promise<void>((resolve) => {
+          resolveSocket = resolve
+        })
+        websocket.addEventListener?.("close", () => {
+          resolveSocket?.()
+          resolveComplete?.()
+          active.delete(request)
+        })
+        // ast-grep-ignore: effect-prefer-program-construction -- this callback closes a foreign WebSocket.
+        abort = async () => {
+          websocket.close(1001, "Rika host is closing")
+          await bounded(socketClosed, shutdownDeadlineMillis)
+          resolveSocket?.()
+          resolveComplete?.()
+          active.delete(request)
+        }
+        return response
+      } else if (response.body !== null && response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") === true) {
+        const reader = response.body.getReader()
+        let bodyFinished = false
+        let bodyCancelled = false
+        let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
+        const finish = () => {
+          if (bodyFinished) return
+          bodyFinished = true
+          resolveComplete?.()
+        }
+        // ast-grep-ignore: effect-prefer-program-construction -- this callback cancels a foreign Fetch stream.
+        abort = async () => {
+          bodyCancelled = true
+          bodyController?.error(new Error("Rika host is closing"))
+          const cancellation = reader.cancel("Rika host is closing")
+          await bounded(cancellation, shutdownDeadlineMillis)
+          finish()
+        }
+        const body = new ReadableStream<Uint8Array>({
+          // ast-grep-ignore: effect-prefer-program-construction -- ReadableStream pull is a foreign stream callback.
+          async pull(controller) {
+            bodyController = controller
+            if (bodyCancelled) {
+              controller.error(new Error("Rika host is closing"))
+              finish()
+              return
+            }
+            try {
+              const result = await reader.read()
+              if (result.done) {
+                controller.close()
+                finish()
+              // oxlint-disable-next-line typescript/no-unsafe-argument, typescript/no-unsafe-type-assertion -- Bun's ReadableStream reader widens its chunk type.
+              } else controller.enqueue(result.value as Uint8Array)
+            } catch (error) {
+              controller.error(error)
+              finish()
+            }
+          },
+          // ast-grep-ignore: effect-prefer-program-construction -- ReadableStream cancel is a foreign stream callback.
+          async cancel(reason) {
+            try {
+              await reader.cancel(reason)
+            } finally {
+              finish()
+            }
+          },
+        })
+        return new Response(body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        })
+      }
+      resolveComplete?.()
+      active.delete(request)
+      return response
+    },
+    (error) => {
+      resolveComplete?.()
+      active.delete(request)
+      throw error
+    },
+  )
+  return tracked
+}
+
 // ast-grep-ignore: effect-prefer-effect-signatures -- this helper drains foreign Fetch promises at shutdown.
 const drain = (active: Set<Promise<unknown>>) =>
   // ast-grep-ignore: effect-prefer-promise-composition -- this helper drains a foreign Fetch promise set.
   Promise.allSettled(active).then(() => undefined)
+
+const drainApplication = (active: Set<ActiveApplicationRequest>) =>
+  // ast-grep-ignore: effect-prefer-promise-composition -- this helper drains a foreign Fetch request set.
+  Promise.allSettled([...active].map((item) => item.complete)).then(() => undefined)
 
 /**
  * Compose one explicit local host. Rika HTTP owns `/api/v2`; Rivet owns `/api/rivet`, and the default gateway uses the
@@ -105,8 +288,7 @@ export const makeApiV2LocalHost = (options: ApiV2LocalHostOptions) =>
                     ),
               ),
             )
-      // ast-grep-ignore: effect-prefer-effect-signatures -- local host owns this foreign promise drain set.
-      const activeApplication = new Set<Promise<unknown>>()
+      const activeApplication = new Set<ActiveApplicationRequest>()
       // ast-grep-ignore: effect-prefer-effect-signatures -- local host owns this foreign promise drain set.
       const activeRivet = new Set<Promise<unknown>>()
       let closed = false
@@ -115,15 +297,16 @@ export const makeApiV2LocalHost = (options: ApiV2LocalHostOptions) =>
       // ast-grep-ignore: effect-prefer-program-construction -- Bun Fetch is the explicit local host boundary.
       const fetch = async (request: Request, websocket?: RuntimeWebSocket) => {
         if (closed) return new Response("Rika host is closed", { status: 503 })
-        if (isRivetRequest(request)) return track(activeRivet, application.registry.handler(request))
+        if (isRivetRequest(request)) return trackResponse(activeRivet, application.registry.handler(request))
         const input = {
           authority: application.authority,
           gateway: application.gateway,
           environment: application.environment,
           request,
         }
+        if (options.product !== undefined) Object.assign(input, { product: options.product })
         if (websocket !== undefined) Object.assign(input, { websocket })
-        return track(activeApplication, Effect.runPromise(application.handle(input)))
+        return trackApplicationResponse(activeApplication, Effect.runPromise(application.handle(input)), websocket)
       }
       // ast-grep-ignore: effect-prefer-program-construction -- Bun registry shutdown is a foreign lifecycle boundary.
       const close = async () => {
@@ -131,9 +314,14 @@ export const makeApiV2LocalHost = (options: ApiV2LocalHostOptions) =>
         closed = true
         // ast-grep-ignore: effect-prefer-program-construction -- Bun registry shutdown is a foreign lifecycle boundary.
         closePromise = (async () => {
-          await drain(activeApplication)
-          await application.registry.shutdown()
-          await drain(activeRivet)
+          await bounded(
+            // ast-grep-ignore: effect-prefer-promise-composition -- shutdown races foreign request aborts against a deadline.
+            Promise.allSettled([...activeApplication].map((request) => request.abort())),
+            shutdownDeadlineMillis,
+          )
+          await bounded(application.registry.shutdown(), shutdownDeadlineMillis)
+          await bounded(drainApplication(activeApplication), shutdownDeadlineMillis)
+          await bounded(drain(activeRivet), shutdownDeadlineMillis)
         })()
         return closePromise
       }
@@ -206,8 +394,11 @@ export const serveApiV2LocalHost = (options: ApiV2LocalServerOptions) =>
       new Request(`http://${server.hostname}:${server.port}/api/rivet/metadata`),
     )
     if (!ready.ok) {
-      await server.stop(true)
-      await host.close()
+      try {
+        await host.close()
+      } finally {
+        await server.stop(true)
+      }
       throw new Error(`Rivet registry readiness failed: ${ready.status}`)
     }
     return {
@@ -215,8 +406,11 @@ export const serveApiV2LocalHost = (options: ApiV2LocalServerOptions) =>
       url: `http://${server.hostname}:${server.port}`,
       // ast-grep-ignore: effect-prefer-program-construction -- Bun Server is a foreign lifecycle API.
       close: async () => {
-        await server.stop(true)
-        await host.close()
+        try {
+          await host.close()
+        } finally {
+          await server.stop(true)
+        }
       },
     } satisfies ApiV2LocalServer
   })

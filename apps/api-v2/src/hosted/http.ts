@@ -2,7 +2,8 @@
 import { Effect, Schema } from "effect"
 import type { Principal, Resource } from "generalist/server"
 import { threadPartition } from "./partition"
-import { authorizeResource, type ProductAuthorityService } from "./product-authority"
+import { authorizeResource, ProductAuthorizationError, type ProductAuthorityService } from "./product-authority"
+import type { ProductRouteError, ProductRouteService, ThreadMetadata, ThreadPage } from "./product-routes"
 import type { RuntimeGateway, RuntimeWebSocket } from "./runtime-gateway"
 import {
   RIKA_DOWNSTREAM_CREDENTIAL,
@@ -52,6 +53,17 @@ const runtimePath = (pathname: string) => {
   return { threadId, upstreamPath: suffix }
 }
 
+const productThreadsPath = (pathname: string) => {
+  if (pathname === "/api/v2/threads") return { threadId: undefined }
+  const match = /^\/api\/v2\/threads\/([^/]+)$/.exec(pathname)
+  if (match?.[1] === undefined) return undefined
+  try {
+    return { threadId: decodeURIComponent(match[1]) }
+  } catch {
+    return undefined
+  }
+}
+
 const edgeRequest = (request: Request) => {
   const clone = request.clone()
   const headers = Object.fromEntries(clone.headers.entries())
@@ -99,6 +111,17 @@ const unavailable = () => ApiV2HttpError.make({ status: 503, message: "Rika serv
 const forbidden = () => ApiV2HttpError.make({ status: 403, message: "Execution resource is unavailable" })
 const healthBody = JSON.stringify({ status: "ok" })
 const receiptBody = (receipt: { readonly sessionId: string; readonly created: boolean }) => JSON.stringify(receipt)
+const productBody = (value: ThreadMetadata | ThreadPage) => JSON.stringify(value)
+const productResponse = (value: ThreadMetadata | ThreadPage, status = 200) =>
+  new Response(productBody(value), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+  })
+
+interface AuthenticationContext {
+  readonly threadId?: string
+  readonly request: Request
+}
 
 const authenticateRequest = Effect.fn("RikaApiV2.Http.authenticateRequest")(function* (input: {
   readonly authority: ProductAuthorityService
@@ -108,9 +131,9 @@ const authenticateRequest = Effect.fn("RikaApiV2.Http.authenticateRequest")(func
 }) {
   const token = bearer(input.request)
   if (token === undefined) return yield* unauthorized()
-  let context: { readonly threadId: string; readonly request: Request } | undefined
-  if (input.requestedThreadId !== undefined) context = { threadId: input.requestedThreadId, request: input.request }
-  else if (input.resourceThreadId !== undefined) context = { threadId: input.resourceThreadId, request: input.request }
+  const context: AuthenticationContext = { request: input.request }
+  if (input.requestedThreadId !== undefined) Object.assign(context, { threadId: input.requestedThreadId })
+  else if (input.resourceThreadId !== undefined) Object.assign(context, { threadId: input.resourceThreadId })
   return yield* input.authority.authenticateBearer(token, context).pipe(
     Effect.mapError(() => unavailable()),
     Effect.flatMap((value) => (value === undefined ? unauthorized() : Effect.succeed(value))),
@@ -187,8 +210,47 @@ const handleResourceRequest = Effect.fn("RikaApiV2.Http.handleResourceRequest")(
     .pipe(Effect.mapError(() => unavailable()))
 })
 
+const parseProductLimit = (request: Request) => {
+  const value = new URL(request.url).searchParams.get("limit")
+  if (value === null) return 50
+  if (!/^(?:[1-9]|[1-9][0-9]|100)$/.test(value)) return undefined
+  return Number(value)
+}
+
+const productFailure = (error: ProductRouteError) =>
+  error.kind === "invalid"
+    ? ApiV2HttpError.make({ status: 400, message: error.message })
+    : unavailable()
+
+const handleProductRequest = Effect.fn("RikaApiV2.Http.handleProductRequest")(function* (input: {
+  readonly product: ProductRouteService | undefined
+  readonly request: Request
+  readonly route: { readonly threadId: string | undefined }
+  readonly principal: Principal
+}) {
+  if (input.request.method !== "GET") return new Response("Method not allowed", { status: 405 })
+  if (input.product === undefined) return yield* unavailable()
+  if (input.route.threadId === undefined) {
+    const limit = parseProductLimit(input.request)
+    if (limit === undefined) return yield* ApiV2HttpError.make({ status: 400, message: "limit must be between 1 and 100" })
+    const cursor = new URL(input.request.url).searchParams.get("cursor") ?? undefined
+    const listInput = { principal: input.principal, limit }
+    if (cursor !== undefined) Object.assign(listInput, { cursor })
+    const page = yield* input.product
+      .listThreads(listInput)
+      .pipe(Effect.mapError(productFailure))
+    return productResponse(page)
+  }
+  const thread = yield* input.product
+    .thread({ principal: input.principal, threadId: input.route.threadId })
+    .pipe(Effect.mapError(productFailure))
+  if (thread === undefined) return new Response('{"message":"Thread is unavailable"}', { status: 404 })
+  return productResponse(thread)
+})
+
 const handle = (input: {
   readonly authority: ProductAuthorityService
+  readonly product?: ProductRouteService
   readonly gateway: RuntimeGateway
   readonly environment: string
   readonly request: Request
@@ -198,6 +260,22 @@ const handle = (input: {
     const request = edgeRequest(input.request)
     const pathname = new URL(request.url).pathname
     if (pathname === "/healthz") return new Response(healthBody, { status: 200 })
+
+    const productRoute = productThreadsPath(pathname)
+    if (productRoute !== undefined) {
+      const principal = yield* authenticateRequest({
+        authority: input.authority,
+        request,
+        requestedThreadId: productRoute.threadId,
+        resourceThreadId: undefined,
+      })
+      return yield* handleProductRequest({
+        product: input.product,
+        request,
+        route: productRoute,
+        principal,
+      })
+    }
 
     const route = runtimePath(pathname)
     const productSessionThreadId = productSessionPath(pathname)
@@ -215,28 +293,42 @@ const handle = (input: {
       requestedThreadId,
       resourceThreadId,
     })
-    const downstreamCredential = input.authority.downstreamCredential?.(principal)
+    const downstream = (threadId: string | undefined): Effect.Effect<string | undefined, ProductAuthorizationError> => {
+      if (threadId === undefined || input.authority.downstreamCredential === undefined)
+        return Effect.map(Effect.void, () => undefined)
+      return input.authority.downstreamCredential({ principal, ownerId: principal.tenantId, threadId, request })
+    }
     if (productSessionThreadId !== undefined)
-      return yield* handleSessionRequest({
-        authority: input.authority,
-        gateway: input.gateway,
-        environment: input.environment,
-        request: upstreamRequest(request, upstreamPath, downstreamCredential),
-        principal,
-        threadId: productSessionThreadId,
-      })
+      return yield* downstream(productSessionThreadId).pipe(
+        Effect.mapError(() => unavailable()),
+        Effect.flatMap((downstreamCredential) =>
+          handleSessionRequest({
+            authority: input.authority,
+            gateway: input.gateway,
+            environment: input.environment,
+            request: upstreamRequest(request, upstreamPath, downstreamCredential),
+            principal,
+            threadId: productSessionThreadId,
+          }),
+        ),
+      )
     if (resource === undefined) return new Response("Not found", { status: 404 })
     if (resourceThreadId === undefined) return yield* forbidden()
-    return yield* handleResourceRequest({
-      authority: input.authority,
-      gateway: input.gateway,
-      environment: input.environment,
-      request: upstreamRequest(request, upstreamPath, downstreamCredential),
-      principal,
-      resource,
-      threadId: resourceThreadId,
-      websocket: input.websocket,
-    })
+    return yield* downstream(resourceThreadId).pipe(
+      Effect.mapError(() => unavailable()),
+      Effect.flatMap((downstreamCredential) =>
+        handleResourceRequest({
+          authority: input.authority,
+          gateway: input.gateway,
+          environment: input.environment,
+          request: upstreamRequest(request, upstreamPath, downstreamCredential),
+          principal,
+          resource,
+          threadId: resourceThreadId,
+          websocket: input.websocket,
+        }),
+      ),
+    )
   })
 
 export const handleApiV2Request = (input: Parameters<typeof handle>[0]) =>

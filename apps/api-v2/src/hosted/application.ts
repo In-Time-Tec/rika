@@ -3,6 +3,7 @@ import { Context, Effect, type Layer } from "effect"
 import type { LanguageModel } from "effect/unstable/ai"
 import type { RuntimeActorDefinition } from "generalist/unstable/rivet"
 import { handleApiV2Request } from "./http"
+import type { ProductRouteService } from "./product-routes"
 import {
   makeRepositoryProductAuthority,
   type ProductAuthorityService,
@@ -17,11 +18,15 @@ import { makeRawRivetGateway } from "./raw-rivet-gateway"
 
 export interface ApiV2ApplicationOptions {
   readonly authority: ProductAuthorityService
+  /** Product metadata reads remain outside the execution Host and are optional for transport-only compositions. */
+  readonly product?: ProductRouteService
   readonly environment: string
   readonly storage: RuntimeStorage
   readonly model: Layer.Layer<LanguageModel.LanguageModel>
   readonly revision: string
   readonly workspace: RuntimeActorOptions["workspace"]
+  /** Resolve one complete context-v2 composition for each actor partition. */
+  readonly context?: RuntimeActorOptions["context"]
   readonly actorOptions?: RuntimeActorOptions["actorOptions"]
   readonly registry?: RuntimeActorOptions["registry"]
   readonly rivetEndpoint?: string
@@ -67,6 +72,7 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
       revision: options.revision,
       workspace: options.workspace,
     }
+    if (options.context !== undefined) Object.assign(actorOptions, { context: options.context })
     if (options.actorOptions !== undefined) Object.assign(actorOptions, { actorOptions: options.actorOptions })
     if (options.registry !== undefined) Object.assign(actorOptions, { registry: options.registry })
     const registry = rivetRegistry(actorOptions)
@@ -98,6 +104,7 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
           environment: options.environment,
           request: input.request,
         }
+        if (options.product !== undefined) Object.assign(request, { product: options.product })
         if (input.websocket !== undefined) Object.assign(request, { websocket: input.websocket })
         return handleApiV2Request(request)
       },
@@ -107,8 +114,10 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
 /** Compose the temporary API directly from Rika's published identity/product repository services. */
 export const makeApiV2RepositoryApplication = (options: ApiV2RepositoryApplicationOptions) => {
   const { productAuthority, ...application } = options
+  const authority = makeRepositoryProductAuthority(productAuthority)
   return makeApiV2Application({
     ...application,
-    authority: makeRepositoryProductAuthority(productAuthority),
+    authority,
+    product: authority.product,
   })
 }

@@ -1,4 +1,5 @@
 import { Effect, Option, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { it } from "@effect/vitest"
 import { expect } from "vitest"
 import { Server } from "generalist/server"
@@ -7,7 +8,7 @@ import type { HostedClientAuthorityService } from "@rika/product/hosted-client-a
 import { HostedPersistenceError } from "@rika/product/hosted-persistence-error"
 import type { ProductRepositoryService } from "@rika/product-store/product-repository"
 import { makeRepositoryProductAuthority } from "../src/hosted/product-authority"
-import { threadPartition } from "../src/hosted/partition"
+import { decodeWorkspaceBinding, threadPartition } from "../src/hosted/partition"
 
 const identity: IdentityRuntime = {
   handle: () => Effect.succeed(new Response("ok")),
@@ -43,6 +44,14 @@ const authorityProjection = {
 const canonicalBinding = {
   partition: threadPartition({ environment: "test", ownerId: "owner", threadId: "thread", target: "runner" }),
   placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+  workspaceBinding: decodeWorkspaceBinding({
+    workspaceId: "workspace",
+    assignmentId: "assignment",
+    generation: 1,
+    placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+    buildId: "build",
+    protocolVersion: 1,
+  }),
 } as const
 
 const product: ProductRepositoryService = {
@@ -56,6 +65,9 @@ const product: ProductRepositoryService = {
   createConnection: unused,
   threadAuthority: () => Effect.succeed(authorityProjection),
   threadAuthorities: unused,
+  personalOwnerId: () => Effect.succeed("owner"),
+  threadMetadataList: unused,
+  threadMetadata: unused,
   threadExecutionContext: unused,
   ready: unused(),
 }
@@ -106,6 +118,23 @@ it.effect("adapts the released identity/device/product authorities to Generalist
   }),
 )
 
+it.effect("authenticates an owner-level product request before a Thread is selected", () =>
+  Effect.gen(function* () {
+    const authority = makeRepositoryProductAuthority({
+      identity,
+      devices,
+      product,
+      clientAuthority: clientAuthority(() => Effect.void),
+      environment: "test",
+      binding: () => Effect.succeed(canonicalBinding),
+    })
+    const principal = yield* authority.authenticateBearer("token", {
+      request: new Request("https://rika.test/api/v2/threads"),
+    })
+    expect(principal).toMatchObject({ tenantId: "owner", role: "controller" })
+  })
+)
+
 it.effect("issues a scoped downstream credential after DPoP edge authentication", () =>
   Effect.gen(function* () {
     let authenticatedRequest:
@@ -151,13 +180,62 @@ it.effect("issues a scoped downstream credential after DPoP edge authentication"
     expect(authenticatedRequest?.url).toBe("https://rika.test/api/v2/threads/thread/runtime/runs/run-1?cursor=abc")
     expect(authenticatedRequest?.authorization).toBe("DPoP access-token")
     expect(authenticatedRequest?.dpop).toBe("proof")
-    const downstreamCredential = authority.downstreamCredential?.(principal!)
+    const forwardedRequest = new Request("https://rivet.local/sessions/root", {
+      method: "GET",
+      headers: {
+        "x-rika-original-request-url": request.url,
+        "x-rika-original-request-method": request.method,
+      },
+    })
+    const downstreamCredential = yield* authority.downstreamCredential!({
+      principal: principal!,
+      ownerId: "owner",
+      threadId: "thread",
+      request,
+    })
     expect(downstreamCredential).toMatch(/^rika-ds-/)
     const downstream = yield* authority.authenticateDownstream!(downstreamCredential!, {
       ownerId: "owner",
       threadId: "thread",
+      request: forwardedRequest,
     })
     expect(downstream).toEqual(principal)
+    expect(
+      yield* authority.authenticateDownstream!(downstreamCredential!, {
+        ownerId: "owner",
+        threadId: "other",
+        request: forwardedRequest,
+      }),
+    ).toBeUndefined()
+    for (let index = 0; index < 3; index++)
+      expect(
+        yield* authority.authenticateDownstream!(downstreamCredential!, {
+          ownerId: "owner",
+          threadId: "thread",
+          request: forwardedRequest,
+        }),
+      ).toEqual(principal)
+    expect(
+      yield* authority.authenticateDownstream!(downstreamCredential!, {
+        ownerId: "owner",
+        threadId: "thread",
+        request: forwardedRequest,
+      }),
+    ).toBeUndefined()
+    const expired = yield* authority.downstreamCredential!({
+      principal: principal!,
+      ownerId: "owner",
+      threadId: "thread",
+      request,
+    })
+    yield* TestClock.adjust("11 seconds")
+    expect(
+      yield* authority.authenticateDownstream!(expired!, {
+        ownerId: "owner",
+        threadId: "thread",
+        request: forwardedRequest,
+      }),
+    ).toBeUndefined()
   }),
 )
 

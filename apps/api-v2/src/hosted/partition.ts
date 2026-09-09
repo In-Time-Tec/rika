@@ -1,4 +1,6 @@
+/* oxlint-disable anti-slop/no-unknown-parameters -- schema decoder accepts untrusted binding input at this boundary. */
 import { Function, Schema } from "effect"
+import { WorkspaceBinding as CanonicalWorkspaceBinding } from "@rika/execution-v2"
 
 const id = Schema.NonEmptyString
 
@@ -31,8 +33,11 @@ export type ThreadPartition = typeof ThreadPartition.Type
 export const ThreadExecutionBinding = Schema.Struct({
   partition: ThreadPartition,
   placement: WorkspacePlacement,
+  /** Canonical execution-v2 fence admitted by the product execution authority. */
+  workspaceBinding: CanonicalWorkspaceBinding,
 })
 export type ThreadExecutionBinding = typeof ThreadExecutionBinding.Type
+export const decodeWorkspaceBinding = (value: unknown) => Schema.decodeUnknownSync(CanonicalWorkspaceBinding)(value)
 
 const segment = (value: string) => encodeURIComponent(value)
 

@@ -16,7 +16,10 @@ import {
 } from "../../database/schema/product"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect, Schema } from "effect"
-import { ProductRepositoryError, type ProductRepositoryService } from "./contract"
+import {
+  ProductRepositoryError,
+  type ProductRepositoryService,
+} from "./contract"
 
 const databaseError = (cause: unknown) => ProductRepositoryError.make({ kind: "unavailable", message: String(cause) })
 const query = <A extends object, E, R>(effect: Effect.Effect<ReadonlyArray<A>, E, R>) =>
@@ -470,5 +473,11 @@ export const threadOperations = Effect.gen(function* () {
       }
     })
 
-  return { existingConnection, createConnection, threadAuthority, threadAuthorities, threadExecutionContext }
+  return {
+    existingConnection,
+    createConnection,
+    threadAuthority,
+    threadAuthorities,
+    threadExecutionContext,
+  }
 })

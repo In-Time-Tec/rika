@@ -111,6 +111,15 @@ export const projectOperations = Effect.gen(function* () {
         .orderBy(asc(identityMember.organizationId)),
     ).pipe(Effect.map((rows) => rows.map((row) => row.id)))
 
+  const personalOwnerId: ProductRepositoryService["personalOwnerId"] = (userId) =>
+    query(
+      db
+        .select({ id: rikaHostedOwners.id })
+        .from(rikaHostedOwners)
+        .where(and(eq(rikaHostedOwners.kind, "personal"), eq(rikaHostedOwners.userId, userId)))
+        .limit(1),
+    ).pipe(Effect.map((rows) => rows[0]?.id))
+
   const projects: ProductRepositoryService["projects"] = (input) =>
     query(
       db
@@ -222,5 +231,5 @@ export const projectOperations = Effect.gen(function* () {
       ),
     )
 
-  return { resolveOwner, organizationIds, projects, projectAccess, createProject }
+  return { resolveOwner, organizationIds, personalOwnerId, projects, projectAccess, createProject }
 })

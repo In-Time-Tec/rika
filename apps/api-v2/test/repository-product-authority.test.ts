@@ -23,7 +23,7 @@ import {
 import type { HostedClientAuthorityService } from "@rika/product/hosted-client-authority"
 import type { ProductRepositoryService } from "@rika/product-store/product-repository"
 import { makeRepositoryProductAuthority } from "../src/hosted/product-authority"
-import { threadPartition } from "../src/hosted/partition"
+import { decodeWorkspaceBinding, threadPartition } from "../src/hosted/partition"
 import { originalRequestForAuthentication } from "../src/hosted/server"
 import {
   RIKA_ORIGINAL_AUTHORIZATION,
@@ -317,6 +317,9 @@ it.effect.skipIf(databaseUrl === "")("authenticates API-v2 through repository-ba
           createConnection: unused,
           threadAuthority: (userId) => Effect.succeed(authorityProjection(userId)),
           threadAuthorities: unused,
+          personalOwnerId: () => Effect.succeed("owner"),
+          threadMetadataList: unused,
+          threadMetadata: unused,
           threadExecutionContext: unused,
           ready: unused(),
         }
@@ -331,6 +334,14 @@ it.effect.skipIf(databaseUrl === "")("authenticates API-v2 through repository-ba
         const binding = {
           partition: threadPartition({ environment: "test", ownerId: "owner", threadId: "thread", target: "runner" }),
           placement: { _tag: "Runner" as const, checkoutFingerprint: "checkout", workspaceId: "workspace" },
+          workspaceBinding: decodeWorkspaceBinding({
+            workspaceId: "workspace",
+            assignmentId: "assignment",
+            generation: 1,
+            placement: { _tag: "Runner" as const, checkoutFingerprint: "checkout", workspaceId: "workspace" },
+            buildId: "build",
+            protocolVersion: 1,
+          }),
         }
         const authority = makeRepositoryProductAuthority({
           identity: runtime,
@@ -359,11 +370,29 @@ it.effect.skipIf(databaseUrl === "")("authenticates API-v2 through repository-ba
           }),
         })
         expect(authenticated?.id).toContain(registration.client_id)
-        const credential = authority.downstreamCredential?.(authenticated!)
+        const credential = yield* authority.downstreamCredential!({
+          principal: authenticated!,
+          ownerId: "owner",
+          threadId: "thread",
+          request: new Request(contextUrl, {
+            method: "POST",
+            headers: { authorization: `DPoP ${tokens.access_token}` },
+          }),
+        })
         expect(credential).toMatch(/^rika-ds-/)
-        expect(yield* authority.authenticateDownstream!(credential!, { ownerId: "owner", threadId: "thread" })).toEqual(
-          authenticated,
-        )
+        expect(
+          yield* authority.authenticateDownstream!(credential!, {
+            ownerId: "owner",
+            threadId: "thread",
+            request: new Request("https://rivet.local/sessions/root", {
+              method: "GET",
+              headers: {
+                "x-rika-original-request-url": contextUrl,
+                "x-rika-original-request-method": "POST",
+              },
+            }),
+          }),
+        ).toEqual(authenticated)
         const invalidProof = yield* dpopProof({
           method: "GET",
           url: contextUrl,

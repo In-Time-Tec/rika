@@ -1,5 +1,6 @@
-/* oxlint-disable effecttsgo/crypto-random-uuid -- downstream credentials require a process CSPRNG. */
-import { Context, Effect, Option, Schema } from "effect"
+/* oxlint-disable effecttsgo/crypto-random-uuid, effecttsgo/crypto-random-uuid-in-effect -- downstream credentials require a process CSPRNG. */
+/* oxlint-disable anti-slop-effect/no-service-constructor-imports -- this adapter composes the hosted product read bridge. */
+import { Clock, Context, Effect, Option, Schema } from "effect"
 import type { CliDeviceDirectory, IdentityPrincipal, IdentityRuntime } from "@rika/identity"
 import type { HostedClientAuthorityService } from "@rika/product/hosted-client-authority"
 import {
@@ -14,8 +15,12 @@ import {
 } from "@rika/product/hosted-model"
 import type { Principal, Resource } from "generalist/server"
 import type { ProductRepositoryService, ThreadAuthorityProjection } from "@rika/product-store/product-repository"
-import type { ThreadExecutionBinding } from "./partition"
-import { threadIdFromRootSession } from "./partition"
+import {
+  ThreadExecutionBinding,
+  threadIdFromRootSession,
+  type ThreadExecutionBinding as ThreadExecutionBindingType,
+} from "./partition"
+import { makeProductRouteService, makeRepositoryProductThreadReader, type ProductRouteService } from "./product-routes"
 
 export class ProductAuthorizationError extends Schema.TaggedError<ProductAuthorizationError>()(
   "RikaApiV2ProductAuthorizationError",
@@ -34,13 +39,23 @@ export interface ProductAuthentication {
   /** Resolve a process-local credential issued after edge authentication; this never re-verifies DPoP. */
   readonly authenticateDownstream?: (
     credential: string,
-    context: { readonly threadId: string; readonly ownerId: string },
+    context: { readonly threadId: string; readonly ownerId: string; readonly request: Request },
   ) => Effect.Effect<Principal | undefined, ProductAuthorizationError>
-  /** Issue the process-local credential used by the Rivet actor transport. */
-  readonly downstreamCredential?: (principal: Principal) => string | undefined
+  /**
+   * Issue a short-lived process-local credential for one authenticated forwarding request. The actor server must share
+   * this authority instance; remote actor runtimes fail closed until a shared sealed assertion is configured.
+   */
+  readonly downstreamCredential?: (input: {
+    readonly principal: Principal
+    readonly ownerId: string
+    readonly threadId: string
+    readonly request: Request
+  }) => Effect.Effect<string | undefined, ProductAuthorizationError>
 }
 
 export interface ProductAuthorityService extends ProductAuthentication {
+  /** Public product metadata routes backed by the same repository and grant authority. */
+  readonly product?: ProductRouteService
   /** Resolve a product Thread to its canonical execution binding without starting work. */
   readonly threadBinding: (
     threadId: string,
@@ -81,14 +96,24 @@ export interface RepositoryProductAuthorityOptions {
   readonly binding: (input: {
     readonly ownerId: string
     readonly threadId: string
-  }) => Effect.Effect<ThreadExecutionBinding, ProductAuthorizationError>
+  }) => Effect.Effect<ThreadExecutionBindingType, ProductAuthorizationError>
 }
 
 interface AuthenticatedActor {
   readonly identity: IdentityPrincipal
   readonly deviceId: string
   readonly principal: Principal
-  readonly downstreamCredential: string
+}
+
+interface DownstreamGrant {
+  readonly principal: Principal
+  readonly identity: IdentityPrincipal
+  readonly ownerId: string
+  readonly threadId: string
+  readonly requestUrl: string
+  readonly requestMethod: string
+  readonly expiresAt: number
+  readonly remainingUses: number
 }
 
 const unavailable = (message: string) => ProductAuthorizationError.make({ kind: "unavailable", message })
@@ -162,8 +187,6 @@ const rememberActor = (
     identity,
     deviceId,
     principal,
-    // ast-grep-ignore: effect-prefer-random -- this process-local opaque credential uses the platform CSPRNG.
-    downstreamCredential: previous?.downstreamCredential ?? `rika-ds-${crypto.randomUUID()}`,
   })
   if (actors.size > 256) {
     const oldest = actors.keys().next().value
@@ -176,10 +199,19 @@ const rememberActor = (
  * policy. The adapter keeps the authenticated actor on the exact Principal object passed through the Generalist
  * middleware, so concurrent clients cannot overwrite one another's client/device context.
  */
-export const makeRepositoryProductAuthority = (options: RepositoryProductAuthorityOptions): ProductAuthorityService => {
+export interface RepositoryProductAuthorityService extends ProductAuthorityService {
+  readonly product: ProductRouteService
+}
+
+export const makeRepositoryProductAuthority = (
+  options: RepositoryProductAuthorityOptions,
+): RepositoryProductAuthorityService => {
   // Generalist decodes CurrentPrincipal before invoking Authorization, so object identity is not stable across the
   // middleware boundary. This bounded identity key carries no credential material and is stable for one client/device.
   const actors = new Map<string, AuthenticatedActor>()
+  const grants = new Map<string, DownstreamGrant>()
+  const downstreamGrantLifetimeMillis = 10_000
+  const downstreamGrantUses = 4
   const authenticateBearer: ProductAuthentication["authenticateBearer"] = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.authenticateBearer",
   )(function* (token, context) {
@@ -197,25 +229,30 @@ export const makeRepositoryProductAuthority = (options: RepositoryProductAuthori
             : unavailable("Identity service unavailable"),
         ),
       )
-    if (identity === undefined || identity.clientId === undefined || context?.threadId === undefined) return undefined
+    if (identity === undefined || identity.clientId === undefined) return undefined
     const deviceId = yield* options.devices
       .authenticate(identity)
       .pipe(Effect.mapError(() => unavailable("Device authority is unavailable")))
     if (deviceId === undefined) return undefined
-    const authority = yield* options.product
-      .threadAuthority(identity.userId, context.threadId)
-      .pipe(Effect.mapError((error) => unavailable(error.message)))
-    if (authority === undefined || (context.ownerId !== undefined && authority.ownerId !== context.ownerId))
-      return undefined
+    const authority =
+      context?.threadId === undefined
+        ? undefined
+        : yield* options.product
+            .threadAuthority(identity.userId, context.threadId)
+            .pipe(Effect.mapError((error) => unavailable(error.message)))
+    const ownerId =
+      authority?.ownerId ??
+      (yield* options.product.personalOwnerId(identity.userId).pipe(Effect.mapError((error) => unavailable(error.message))))
+    if (ownerId === undefined || (context?.ownerId !== undefined && ownerId !== context.ownerId)) return undefined
     const principal: Principal = {
       id: principalId({
         userId: identity.userId,
-        ownerId: authority.ownerId,
+        ownerId,
         clientId: identity.clientId,
         deviceId,
       }),
-      tenantId: authority.ownerId,
-      role: generalistRole(authority, identity.userId),
+      tenantId: ownerId,
+      role: authority === undefined ? "controller" : generalistRole(authority, identity.userId),
     }
     rememberActor(actors, principal, identity, deviceId)
     return principal
@@ -223,21 +260,71 @@ export const makeRepositoryProductAuthority = (options: RepositoryProductAuthori
 
   const authenticateDownstream: NonNullable<ProductAuthentication["authenticateDownstream"]> = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.authenticateDownstream",
-  )((credential, context) => {
-    const actor = [...actors.values()].find((candidate) => candidate.downstreamCredential === credential)
-    return Effect.succeed(
-      actor === undefined || actor.principal.tenantId !== context.ownerId ? undefined : actor.principal,
-    )
+  )(function* (credential, context) {
+    const grant = grants.get(credential)
+    const now = yield* Clock.currentTimeMillis
+    if (
+      grant === undefined ||
+      grant.expiresAt <= now ||
+      grant.remainingUses <= 0 ||
+      grant.ownerId !== context.ownerId ||
+      grant.threadId !== context.threadId ||
+      context.request.headers.get("x-rika-original-request-url") !== grant.requestUrl ||
+      context.request.headers.get("x-rika-original-request-method") !== grant.requestMethod
+    ) {
+      if (grant?.expiresAt !== undefined && grant.expiresAt <= now) grants.delete(credential)
+      return undefined
+    }
+    const deviceId = yield* options.devices
+      .authenticate(grant.identity)
+      .pipe(Effect.mapError(() => unavailable("Device authority is unavailable")))
+    if (deviceId === undefined || deviceId !== actors.get(grant.principal.id)?.deviceId) {
+      grants.delete(credential)
+      return undefined
+    }
+    if (grant.remainingUses === 1) grants.delete(credential)
+    else grants.set(credential, { ...grant, remainingUses: grant.remainingUses - 1 })
+    return grant.principal
   })
 
-  const downstreamCredential: NonNullable<ProductAuthentication["downstreamCredential"]> = (principal) =>
-    actors.get(principal.id)?.downstreamCredential
+  const downstreamCredential: NonNullable<ProductAuthentication["downstreamCredential"]> = Effect.fn(
+    "RikaApiV2.RepositoryProductAuthority.downstreamCredential",
+  )(function* (input) {
+    const actor = actors.get(input.principal.id)
+    if (actor === undefined || actor.principal.tenantId !== input.ownerId) return undefined
+    const now = yield* Clock.currentTimeMillis
+    // ast-grep-ignore: effect-prefer-random -- this process-local opaque credential uses the platform CSPRNG.
+    const credential = `rika-ds-${crypto.randomUUID()}`
+    grants.set(credential, {
+      principal: input.principal,
+      identity: actor.identity,
+      ownerId: input.ownerId,
+      threadId: input.threadId,
+      requestUrl: input.request.url,
+      requestMethod: input.request.method,
+      expiresAt: now + downstreamGrantLifetimeMillis,
+      remainingUses: downstreamGrantUses,
+    })
+    if (grants.size > 256) {
+      const oldest = grants.keys().next().value
+      if (oldest !== undefined) grants.delete(oldest)
+    }
+    return credential
+  })
 
   const threadBinding: ProductAuthorityService["threadBinding"] = Effect.fn(
     "RikaApiV2.RepositoryProductAuthority.threadBinding",
   )(function* (threadId, ownerId) {
     if (ownerId === undefined) return undefined
-    const binding = yield* options.binding({ ownerId, threadId })
+    const binding = yield* options
+      .binding({ ownerId, threadId })
+      .pipe(
+        Effect.flatMap((value) =>
+          Schema.decodeEffect(ThreadExecutionBinding)(value).pipe(
+            Effect.mapError(() => invalid("Canonical Thread execution binding is malformed")),
+          ),
+        ),
+      )
     if (
       binding.partition.environment !== options.environment ||
       binding.partition.ownerId !== ownerId ||
@@ -280,7 +367,19 @@ export const makeRepositoryProductAuthority = (options: RepositoryProductAuthori
     },
   )
 
-  return { authenticateBearer, authenticateDownstream, downstreamCredential, threadBinding, resourceThread, authorize }
+  const authority: ProductAuthorityService = {
+    authenticateBearer,
+    authenticateDownstream,
+    downstreamCredential,
+    threadBinding,
+    resourceThread,
+    authorize,
+  }
+  const product = makeProductRouteService({
+    authority,
+    reader: makeRepositoryProductThreadReader({ product: options.product, environment: options.environment }),
+  })
+  return { ...authority, product }
 }
 
 export const authorizeResource = Effect.fn("RikaApiV2.ProductAuthority.authorizeResource")(function* (

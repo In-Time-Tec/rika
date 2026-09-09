@@ -3,7 +3,7 @@ import { expect } from "vitest"
 import { it } from "@effect/vitest"
 import type { Principal } from "generalist/server"
 import { handleApiV2Request } from "../src/hosted/http"
-import { threadPartition, type ThreadExecutionBinding } from "../src/hosted/partition"
+import { decodeWorkspaceBinding, threadPartition, type ThreadExecutionBinding } from "../src/hosted/partition"
 import type { ProductAuthorityService } from "../src/hosted/product-authority"
 import type { RootSessionReceipt, RuntimeGateway } from "../src/hosted/runtime-gateway"
 
@@ -12,6 +12,14 @@ const partition = threadPartition({ environment: "test", ownerId: "owner", threa
 const binding: ThreadExecutionBinding = {
   partition,
   placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+  workspaceBinding: decodeWorkspaceBinding({
+    workspaceId: "workspace",
+    assignmentId: "assignment",
+    generation: 1,
+    placement: { _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" },
+    buildId: "build",
+    protocolVersion: 1,
+  }),
 }
 
 const authority = (allowed: boolean): ProductAuthorityService => ({
@@ -117,7 +125,7 @@ it.effect("passes DPoP credentials and the original request to repository author
           capturedRequest = context?.request
           return Effect.succeed(principal)
         },
-        downstreamCredential: () => "rika-ds-test",
+        downstreamCredential: () => Effect.succeed("rika-ds-test"),
       },
       gateway: {
         ensureRootSession: () => Effect.succeed({ sessionId: partition.rootSessionId, created: false }),

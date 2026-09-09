@@ -12,9 +12,14 @@ import {
 } from "generalist/unstable/rivet"
 import { ExecutableResolver } from "generalist/runtime"
 import type { LanguageModel } from "effect/unstable/ai"
-import type { RunnerWorkspaceError, RunnerWorkspaceService } from "./host"
+import type {
+  ApiV2ContextComposition,
+  HostOptions,
+  RunnerWorkspaceError,
+  RunnerWorkspaceService,
+} from "./host"
 import { serverOptionsEffect } from "./server"
-import { threadPartition, type ThreadExecutionBinding } from "./partition"
+import { threadPartition, type ThreadExecutionBinding, type ThreadPartition } from "./partition"
 import { ProductAuthorizationError, type ProductAuthorityService } from "./product-authority"
 import type { RuntimeStorage } from "./storage"
 
@@ -53,6 +58,11 @@ export interface RuntimeActorOptions {
   readonly model: Layer.Layer<LanguageModel.LanguageModel>
   readonly revision: string
   readonly workspace: (binding: ThreadExecutionBinding) => Effect.Effect<RunnerWorkspaceService, RunnerWorkspaceError>
+  /** Resolve all Session context providers from the validated partition binding; never reuse another Thread's values. */
+  readonly context?: (input: {
+    readonly partition: ThreadPartition
+    readonly binding: ThreadExecutionBinding
+  }) => Effect.Effect<ApiV2ContextComposition | undefined, ProductAuthorizationError>
   readonly actorOptions?: GeneralistRuntimeActorOptions["actorOptions"]
   readonly registry?: Omit<RegistryConfigInput<{ readonly rikaRuntime: RuntimeActorDefinition }>, "use">
 }
@@ -60,6 +70,14 @@ export interface RuntimeActorOptions {
 const keyParts = Schema.Tuple([Schema.NonEmptyString, Schema.NonEmptyString, Schema.NonEmptyString])
 
 const decodeKey = (key: ReadonlyArray<string>) => Schema.decodeUnknownSync(keyParts)(key)
+
+const samePlacement = (left: ThreadExecutionBinding["placement"], right: ThreadExecutionBinding["placement"]) =>
+  left._tag === right._tag &&
+  (left._tag === "Runner"
+    ? right._tag === "Runner" &&
+      left.workspaceId === right.workspaceId &&
+      left.checkoutFingerprint === right.checkoutFingerprint
+    : right._tag === "Orb" && left.workspaceId === right.workspaceId && left.lineageId === right.lineageId)
 
 export const namespaceForKey = (key: ReadonlyArray<string>) => {
   const [environment, ownerId, threadId] = decodeKey(key)
@@ -95,14 +113,36 @@ export const makeRuntimeActorDefinition = (options: RuntimeActorOptions): Runtim
             target: binding.partition.target,
           })
           const workspace = yield* options.workspace(binding)
+          const executionBinding = binding.workspaceBinding
+          if (executionBinding === undefined)
+            return yield* ProductAuthorizationError.make({
+              kind: "invalid",
+              message: `Rika Thread ${threadId} has no canonical execution workspace binding`,
+            })
+          if (!samePlacement(binding.placement, executionBinding.placement))
+            return yield* ProductAuthorizationError.make({
+              kind: "invalid",
+              message: `Rika Thread ${threadId} has mismatched execution placement evidence`,
+            })
+          const host: HostOptions = {
+            revision: options.revision,
+            model: options.model,
+            workspace,
+          }
+          if (options.context !== undefined) {
+            const composition = yield* options.context({ partition, binding })
+            if (composition !== undefined)
+              Object.assign(host, {
+                context: composition.context,
+                contextMaterialization: composition.materialization,
+                contextAuthorization: composition.authorization,
+                contextModelRegistry: composition.modelRegistry,
+              })
+          }
           return yield* serverOptionsEffect({
             authority: options.authority,
             partition,
-            host: {
-              revision: options.revision,
-              model: options.model,
-              workspace,
-            },
+            host,
           })
         }).pipe(Effect.orDie),
     },

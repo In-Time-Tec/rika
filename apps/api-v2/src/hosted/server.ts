@@ -69,6 +69,7 @@ const authentication = (input: { readonly authority: ProductAuthorityService; re
             principal = yield* input.authority.authenticateDownstream(downstreamCredential, {
               ownerId: input.partition.ownerId,
               threadId: input.partition.threadId,
+              request,
             })
           if (principal === undefined || principal.tenantId !== input.partition.ownerId)
             return yield* Server.Unauthorized.make({})

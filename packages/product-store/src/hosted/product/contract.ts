@@ -30,6 +30,22 @@ export interface ThreadAuthorityProjection {
   readonly threadRole: ProductProject["role"] | null
   readonly projectRole: ProductProject["role"] | null
 }
+export interface ProductThreadMetadata {
+  readonly id: string
+  readonly title: string
+  readonly target: "runner" | "orb"
+  readonly updatedAt: number
+  readonly pinned: boolean
+}
+export interface ProductThreadMetadataCursor {
+  readonly pinned: boolean
+  readonly updatedAt: number
+  readonly threadId: string
+}
+export interface ProductThreadMetadataPage {
+  readonly threads: ReadonlyArray<ProductThreadMetadata>
+  readonly nextCursor?: ProductThreadMetadataCursor
+}
 export interface ThreadExecutionProjection {
   readonly assignmentId: string
   readonly workspaceId: string
@@ -120,6 +136,19 @@ export interface ProductRepositoryService {
     ownerId: string,
     threadIds: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<ThreadAuthorityProjection & { readonly threadId: string }>, ProductRepositoryError>
+  /** Resolve the personal owner without creating an owner row on a read path. */
+  readonly personalOwnerId: (userId: string) => Effect.Effect<string | undefined, ProductRepositoryError>
+  /** List canonical product Thread metadata without consulting execution projections. */
+  readonly threadMetadataList: (input: {
+    readonly ownerId: string
+    readonly cursor?: ProductThreadMetadataCursor
+    readonly limit: number
+  }) => Effect.Effect<ProductThreadMetadataPage, ProductRepositoryError>
+  /** Read canonical product Thread metadata for one owner. */
+  readonly threadMetadata: (
+    ownerId: string,
+    threadId: string,
+  ) => Effect.Effect<ProductThreadMetadata | undefined, ProductRepositoryError>
   readonly threadExecutionContext: (
     ownerId: string,
     threadId: string,

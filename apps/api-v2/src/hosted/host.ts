@@ -3,10 +3,18 @@
 /* oxlint-disable typescript/no-unsafe-return -- Generalist's higher-kinded Host requirement is closed above. */
 import { Context, Effect, Function, Layer, Schema } from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
-import { Agent, Approvals, Permissions, ToolContext } from "generalist"
+import { Agent, Approvals, ModelRegistry, Permissions, ToolContext } from "generalist"
 import { Host, ToolIdentity, type SessionHandle } from "generalist/host"
 import type { Host as GeneralistHost } from "generalist/host"
 import type { Runtime } from "generalist/runtime"
+import { WorkspaceComponent } from "@rika/execution-v2"
+import {
+  makeSessionMaterializationComponent,
+  type SessionAuthorizationService,
+  type SessionContextComposition,
+  type SessionMaterialization,
+} from "@rika/context-v2"
+import * as Components from "generalist/components"
 import type { ThreadPartition, WorkspacePlacement } from "./partition"
 
 export const RunnerResult = Schema.Struct({
@@ -66,6 +74,17 @@ const runnerHandler = Effect.fn("RikaApiV2.RunnerWorkspace.execute")(function* (
   return yield* workspace.execute(invocation)
 })
 
+const makeAuthorizedRunnerHandler = (authorization: SessionAuthorizationService) =>
+  Effect.fn("RikaApiV2.RunnerWorkspace.authorizedExecute")(function* (input: typeof runnerParameters.Type) {
+    const context = yield* ToolContext.ToolContext
+    const current = yield* authorization
+      .current(context.sessionId)
+      .pipe(Effect.mapError((error) => RunnerWorkspaceError.make({ kind: "forbidden", message: error.message })))
+    if (!current.allowedTools.includes("rika_runner"))
+      return yield* RunnerWorkspaceError.make({ kind: "forbidden", message: "rika_runner is not currently allowed" })
+    return yield* runnerHandler(input)
+  })
+
 export const rikaAgent = Agent.make({
   name: "rika",
   input: Schema.String,
@@ -76,10 +95,25 @@ export const rikaAgent = Agent.make({
   toolExecution: "background",
 })
 
+export interface ApiV2ContextComposition {
+  readonly context: SessionContextComposition
+  readonly materialization: SessionMaterialization
+  readonly authorization: SessionAuthorizationService
+  readonly modelRegistry: Layer.Layer<ModelRegistry.ModelRegistry>
+}
+
 export interface HostOptions {
   readonly revision: string
   readonly model: Layer.Layer<LanguageModel.LanguageModel>
   readonly workspace: RunnerWorkspaceService
+  /** Restored context-v2 Session composition; static agent defaults are only for legacy callers. */
+  readonly context?: SessionContextComposition
+  /** Provider registry selected by context-v2 model configuration. */
+  readonly contextModelRegistry?: Layer.Layer<ModelRegistry.ModelRegistry>
+  /** Canonical context-v2 materialization restored into the Session component registry. */
+  readonly contextMaterialization?: SessionMaterialization
+  /** Current product authorization for context-v2 tool admission. */
+  readonly contextAuthorization?: SessionAuthorizationService
   readonly limits?: {
     readonly tree: { readonly maxDepth: number; readonly maxSessions: number }
     readonly concurrency: { readonly agents: number; readonly tools: number }
@@ -90,9 +124,18 @@ const agents = { rika: rikaAgent } as const
 export type RikaHost = GeneralistHost<typeof agents>
 
 export const hostEffect = (options: HostOptions): Effect.Effect<RikaHost, never, Runtime.Runtime> => {
+  const activeAgent = options.context?.agent ?? rikaAgent
+  const legacyHandler =
+    options.contextAuthorization === undefined
+      ? runnerHandler
+      : makeAuthorizedRunnerHandler(options.contextAuthorization)
+  const contextDeclaration =
+    options.contextMaterialization === undefined
+      ? undefined
+      : makeSessionMaterializationComponent(options.contextMaterialization)
   const hostOptions = {
     revision: options.revision,
-    agents,
+    agents: { rika: activeAgent },
     tools: [runnerTool] as const,
     limits: options.limits ?? {
       tree: { maxDepth: 3, maxSessions: 32 },
@@ -104,11 +147,18 @@ export const hostEffect = (options: HostOptions): Effect.Effect<RikaHost, never,
       Layer.mergeAll(
         options.model,
         Layer.succeed(RunnerWorkspace, options.workspace),
-        Permissions.layerAllowAll,
+        Components.layer(
+          contextDeclaration === undefined
+            ? [WorkspaceComponent.declaration.registration]
+            : [WorkspaceComponent.declaration.registration, contextDeclaration.registration],
+        ),
+        Permissions.layerRuleset({ rules: [{ pattern: "rika_runner", level: "allow" }], fallback: "deny" }),
         Approvals.layerAutoApprove,
         runnerToolkit
-          .toLayer({ rika_runner: runnerHandler })
+          .toLayer({ rika_runner: legacyHandler })
           .pipe(Layer.provide(Layer.succeed(RunnerWorkspace, options.workspace))),
+        ...(options.context?.instructions === undefined ? [] : [options.context.instructions]),
+        ...(options.contextModelRegistry === undefined ? [] : [options.contextModelRegistry]),
       ),
     ),
     Effect.orDie,
