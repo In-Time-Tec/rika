@@ -1,5 +1,7 @@
+/* oxlint-disable typescript/no-unsafe-type-assertion -- the released raw-client factory hides its driver surface. */
+/* oxlint-disable anti-slop/no-chained-type-assertions -- the released raw-client factory hides its driver surface. */
 import { Effect, Layer, Schema } from "effect"
-import { setup } from "rivetkit"
+import { createClientWithDriver, setup, type RegistryConfigInput } from "rivetkit"
 import {
   makeRuntimeActor,
   type RuntimeActorDefinition,
@@ -13,11 +15,29 @@ import { threadPartition, type ThreadExecutionBinding } from "./partition"
 import { ProductAuthorizationError, type ProductAuthorityService } from "./product-authority"
 import type { RuntimeStorage } from "./storage"
 
+type RivetRegistry = ReturnType<typeof setup>
+
 export interface RuntimeRegistry {
   readonly config: {
     readonly use: { readonly rikaRuntime: RuntimeActorDefinition }
   }
+  readonly handler: RivetRegistry["handler"]
+  readonly shutdown: RivetRegistry["shutdown"]
+  readonly startAndWait: RivetRegistry["startAndWait"]
 }
+
+export interface RawRivetActorHandle {
+  readonly fetch: typeof fetch
+}
+
+export interface RawRivetClient {
+  readonly get: (name: string, key?: string | string[]) => RawRivetActorHandle
+}
+
+/** Keep the released raw-client factory behind the only Rivet import seam. */
+export const createRawRivetClient = (driver: never): RawRivetClient =>
+  // SAFETY: The released factory returns a ClientRaw whose get/fetch contract matches this narrow adapter surface.
+  createClientWithDriver(driver, { encoding: "bare" }) as unknown as RawRivetClient
 
 export interface RuntimeActorOptions {
   readonly authority: ProductAuthorityService
@@ -26,6 +46,7 @@ export interface RuntimeActorOptions {
   readonly revision: string
   readonly workspace: (binding: ThreadExecutionBinding) => Effect.Effect<RunnerWorkspaceService, RunnerWorkspaceError>
   readonly actorOptions?: GeneralistRuntimeActorOptions["actorOptions"]
+  readonly registry?: Omit<RegistryConfigInput<{ readonly rikaRuntime: RuntimeActorDefinition }>, "use">
 }
 
 const keyParts = Schema.Tuple([Schema.NonEmptyString, Schema.NonEmptyString, Schema.NonEmptyString])
@@ -82,5 +103,10 @@ export const makeRuntimeActorDefinition = (options: RuntimeActorOptions): Runtim
   return makeRuntimeActor(actorOptions)
 }
 
-export const rivetRegistry = (options: RuntimeActorOptions): RuntimeRegistry =>
-  setup({ use: { rikaRuntime: makeRuntimeActorDefinition(options) } })
+export const rivetRegistry = (options: RuntimeActorOptions): RuntimeRegistry => {
+  const config = {
+    ...options.registry,
+    use: { rikaRuntime: makeRuntimeActorDefinition(options) },
+  }
+  return setup(config)
+}

@@ -13,6 +13,7 @@ import { rivetRegistry, type RuntimeActorOptions, type RuntimeRegistry } from ".
 import { authorizedRuntimeRequest, type RuntimeGateway } from "./runtime-gateway"
 import { threadPartition, type ExecutionTarget, type ThreadPartition } from "./partition"
 import type { RuntimeStorage } from "./storage"
+import { makeRawRivetGateway } from "./raw-rivet-gateway"
 
 export interface ApiV2ApplicationOptions {
   readonly authority: ProductAuthorityService
@@ -22,7 +23,8 @@ export interface ApiV2ApplicationOptions {
   readonly revision: string
   readonly workspace: RuntimeActorOptions["workspace"]
   readonly actorOptions?: RuntimeActorOptions["actorOptions"]
-  readonly gateway: RuntimeGateway
+  readonly registry?: RuntimeActorOptions["registry"]
+  readonly gateway?: RuntimeGateway
 }
 
 export interface ApiV2RepositoryApplicationOptions extends Omit<ApiV2ApplicationOptions, "authority"> {
@@ -63,7 +65,9 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
       workspace: options.workspace,
     }
     if (options.actorOptions !== undefined) Object.assign(actorOptions, { actorOptions: options.actorOptions })
+    if (options.registry !== undefined) Object.assign(actorOptions, { registry: options.registry })
     const registry = rivetRegistry(actorOptions)
+    const gateway = options.gateway ?? makeRawRivetGateway({ registry })
     const runtimeActor = registry.config.use.rikaRuntime
     const partitionForThread = (input: {
       readonly ownerId: string
@@ -74,7 +78,7 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
     return ApiV2Application.of({
       authority: options.authority,
       environment: options.environment,
-      gateway: options.gateway,
+      gateway,
       runtimeActor,
       registry,
       partitionForThread,
@@ -82,7 +86,7 @@ export const makeApiV2Application = (options: ApiV2ApplicationOptions) =>
       handle: (input) => {
         const request = {
           authority: options.authority,
-          gateway: options.gateway,
+          gateway,
           environment: options.environment,
           request: input.request,
         }

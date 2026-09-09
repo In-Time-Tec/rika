@@ -7,8 +7,23 @@ import type { HostOptions } from "./host"
 import { hostEffect } from "./host"
 import { threadPartition, type ThreadPartition } from "./partition"
 import { authorizeResource, type ProductAuthorityService } from "./product-authority"
+import { RIVET_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
 
 type ServerUnauthorized = InstanceType<typeof Server["Unauthorized"]>
+
+export const originalRequestForAuthentication = (request: Request) => {
+  const url = request.headers.get(RIVET_ORIGINAL_REQUEST_URL)
+  if (url === null) return request
+  try {
+    const clone = request.clone()
+    const init: RequestInit = { method: clone.method, headers: Object.fromEntries(clone.headers.entries()) }
+    if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
+      Object.assign(init, { body: clone.body, duplex: "half" })
+    return new Request(url, init)
+  } catch {
+    return request
+  }
+}
 
 const authentication = (input: { readonly authority: ProductAuthorityService; readonly partition: ThreadPartition }) =>
   Layer.succeed(
@@ -28,7 +43,7 @@ const authentication = (input: { readonly authority: ProductAuthorityService; re
           const principal = yield* input.authority.authenticateBearer(Redacted.value(credential), {
             ownerId: input.partition.ownerId,
             threadId: input.partition.threadId,
-            request,
+            request: originalRequestForAuthentication(request),
           })
           if (principal === undefined || principal.tenantId !== input.partition.ownerId)
             return yield* Server.Unauthorized.make({})

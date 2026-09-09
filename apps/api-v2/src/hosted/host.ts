@@ -4,7 +4,7 @@
 import { Context, Effect, Function, Layer, Schema } from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { Agent, Approvals, Permissions, ToolContext } from "generalist"
-import { Host, type SessionHandle } from "generalist/host"
+import { Host, ToolIdentity, type SessionHandle } from "generalist/host"
 import type { Host as GeneralistHost } from "generalist/host"
 import type { Runtime } from "generalist/runtime"
 import type { ThreadPartition, WorkspacePlacement } from "./partition"
@@ -47,6 +47,9 @@ const runnerTool = Tool.make("rika_runner", {
   failure: Schema.Struct({ kind: Schema.String, message: Schema.String }),
   failureMode: "return",
   dependencies: [RunnerWorkspace, ToolContext.ToolContext],
+}).annotate(ToolIdentity, {
+  implementation: "rika/api-v2/runner-workspace",
+  policy: "rika/api-v2/runner-workspace",
 })
 
 export const runnerToolkit = Toolkit.make(runnerTool)
@@ -90,6 +93,7 @@ export const hostEffect = (options: HostOptions): Effect.Effect<RikaHost, never,
   const hostOptions = {
     revision: options.revision,
     agents,
+    tools: [runnerTool] as const,
     limits: options.limits ?? {
       tree: { maxDepth: 3, maxSessions: 32 },
       concurrency: { agents: 4, tools: 8 },
