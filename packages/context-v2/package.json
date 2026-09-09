@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/context-v2",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./component": "./src/component.ts",
+    "./contract": "./src/contract.ts",
+    "./materializer": "./src/materializer.ts",
+    "./workspace": "./src/workspace.ts"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/context-v2/src packages/context-v2/test",
+    "test": "bun --cwd ../.. --bun vitest run --project unit packages/context-v2",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112",
+    "generalist": "0.65.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "context"
+  }
+}
