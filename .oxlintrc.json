@@ -223,6 +223,12 @@
       "rules": {
         "effecttsgo/duplicate-package": "off"
       }
+    },
+    {
+      "files": ["packages/runner-v2/**"],
+      "rules": {
+        "effecttsgo/duplicate-package": "off"
+      }
     }
   ],
   "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "tools/oxlint/anti-slop"]

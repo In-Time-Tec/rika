@@ -64,6 +64,15 @@ const makeSessionJournal = (): WorkspaceComponentJournal => {
         }
         return state
       }),
+    cleanup: (operation, settlement, _commandId) =>
+      Effect.sync(() => {
+        if (settlement.operationId !== operation.operationId) throw new Error("settlement identity mismatch")
+        state = {
+          binding: state.binding,
+          admitted: state.admitted.filter((entry) => entry.operationId !== operation.operationId),
+        }
+        return state
+      }),
   }
 }
 
@@ -111,6 +120,59 @@ const admit = (component: WorkspaceComponentJournal, coordinator: ReturnType<typ
   })
 
 describe("execution-v2 native operation authority", () => {
+  it.effect("releases only terminal intents and keeps the admission bound reusable", () =>
+    Effect.gen(function* () {
+      const component = makeSessionJournal()
+      const executor: ExecutorBoundary = {
+        handshake: () => Effect.succeed(binding),
+        dispatch: (operation) =>
+          Effect.succeed(
+            decodeEvidence({
+              operationId: operation.operationId,
+              inputDigest: operation.inputDigest,
+              binding: operation.binding,
+              source: "dispatch",
+              outcome: { _tag: "Completed", result: { operationId: operation.operationId } },
+            }),
+          ),
+        receipt: () => Effect.succeed(undefined),
+      }
+      const coordinator = makeNativeOperationCoordinator(component, executor)
+      yield* coordinator.bind(binding, "bind-cleanup")
+      for (let index = 0; index < 129; index += 1) {
+        const operation: NativeOperationIntent = {
+          operationId: `operation-cleanup-${index}`,
+          tool: "bash",
+          inputDigest: `input-cleanup-${index}`,
+          binding,
+        }
+        yield* coordinator.admit(operation, `admit-cleanup-${index}`)
+        const result = yield* coordinator.dispatch(operation)
+        expect(result).toMatchObject({ _tag: "Completed", operationId: operation.operationId })
+        yield* coordinator.cleanup(operation, result, `cleanup-${index}`)
+      }
+      expect(yield* component.read).toMatchObject({ binding, admitted: [] })
+    }),
+  )
+
+  it.effect("does not release Accepted or Unknown outcomes", () =>
+    Effect.gen(function* () {
+      const component = makeSessionJournal()
+      const coordinator = makeNativeOperationCoordinator(
+        component,
+        boundaryFor(
+          () => Effect.succeed(evidence({ _tag: "Accepted" })),
+          () => Effect.succeed(undefined),
+        ),
+      )
+      yield* admit(component, coordinator)
+      const accepted = yield* coordinator.dispatch(intent)
+      const acceptedCleanup = yield* Effect.exit(coordinator.cleanup(intent, accepted, "cleanup-accepted"))
+      expect(acceptedCleanup._tag).toBe("Failure")
+      expect(yield* component.read).toMatchObject({ admitted: [{ operationId: intent.operationId }] })
+    }),
+  )
+
   it.effect("does not reach an Executor before Generalist admission", () =>
     Effect.gen(function* () {
       const component = makeSessionJournal()
@@ -166,6 +228,7 @@ describe("execution-v2 native operation authority", () => {
         }),
         bind: () => Effect.die("bind must not run during dispatch"),
         admit: () => Effect.die("admit must not run during dispatch"),
+        cleanup: () => Effect.die("cleanup must not run during dispatch"),
       }
       const coordinator = makeNativeOperationCoordinator(
         component,

@@ -8,6 +8,7 @@
     ".": "./src/engine/runtime.ts",
     "./route": "./src/routing/route.ts",
     "./local-tools": "./src/tool/local.ts",
+    "./local-runtime": "./src/tool/runtime.ts",
     "./mcp-tools": "./src/tool/mcp.ts",
     "./remote-tools": "./src/remote-tools.ts",
     "./postgres": "./src/postgres.ts",

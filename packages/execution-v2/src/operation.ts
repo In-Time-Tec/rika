@@ -16,7 +16,7 @@ import {
   validateHandshake,
 } from "./executor"
 import type { ExecutorBoundary } from "./executor"
-import type { WorkspaceComponentJournal } from "./component"
+import type { CanonicalTerminalSettlement, WorkspaceComponentJournal } from "./component"
 
 const Identity = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
 const InputDigest = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256))
@@ -94,6 +94,12 @@ export interface NativeOperationCoordinator {
     intent: NativeOperationIntent,
     commandId: string,
   ) => Effect.Effect<NativeOperationIntent, NativeOperationError>
+  /** Owner-only release after Generalist has durably retained a terminal Tool result. */
+  readonly cleanup: (
+    intent: NativeOperationIntent,
+    settlement: CanonicalResult,
+    commandId: string,
+  ) => Effect.Effect<void, NativeOperationError>
   readonly handshake: (
     intent: NativeOperationIntent,
   ) => Effect.Effect<HandshakeEvidence, ExecutorFenceError | ExecutorTransportError>
@@ -191,6 +197,19 @@ const makeCoordinator = (
     )
   }
 
+  const cleanup = (intent: NativeOperationIntent, settlement: CanonicalResult, commandId: string) => {
+    if (settlement._tag !== "Completed" && settlement._tag !== "DomainFailure")
+      return NativeOperationError.make({
+        kind: "component",
+        message: "Only a canonical Completed or DomainFailure result can release a native operation intent",
+      })
+    const terminal: CanonicalTerminalSettlement = settlement
+    return component.cleanup(intent, terminal, commandId).pipe(
+      Effect.asVoid,
+      Effect.mapError((error) => NativeOperationError.make({ kind: "component", message: error.message })),
+    )
+  }
+
   const handshake = (intent: NativeOperationIntent) => {
     const request = HandshakeRequest.make({ binding: intent.binding })
     if (!bounded(request, maxHandshakeBytes))
@@ -249,7 +268,7 @@ const makeCoordinator = (
     return canonicalFromEvidence(intent, verified)
   })
 
-  return { admit, bind, dispatch, handshake, reconcile }
+  return { admit, bind, cleanup, dispatch, handshake, reconcile }
 }
 
 /** Construct the coordinator inside a Generalist Tool handler; canonical settlement is the handler return value. */
