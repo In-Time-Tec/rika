@@ -1,6 +1,6 @@
 import { BunCrypto } from "@effect/platform-bun"
 /* oxlint-disable effecttsgo/effect-succeed-with-void -- auth rejection fixture returns no principal by design. */
-import { Effect, Layer, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect"
 import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
 import { it } from "@effect/vitest"
 import { expect } from "vitest"
@@ -87,8 +87,7 @@ it.effect("rejects unauthenticated upgrades before any gateway transport forward
     Effect.gen(function* () {
       let forwarded = 0
       const unauthenticated: ProductAuthorityService = {
-        authenticateBearer: () =>
-          Effect.succeed(undefined),
+        authenticateBearer: () => Effect.succeed(undefined),
         threadBinding: () => Effect.succeed(binding),
         resourceThread: () => Effect.succeed(partition.threadId),
         authorize: () => Effect.succeed(true),
@@ -129,6 +128,55 @@ it.effect("rejects unauthenticated upgrades before any gateway transport forward
       )
       expect(response.status).toBe(401)
       expect(forwarded).toBe(0)
+    }),
+  ),
+)
+
+it.effect("drains in-flight application requests before closing the Rivet registry", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const closed = yield* Deferred.make<void>()
+      const host = yield* makeApiV2LocalHost({
+        authority,
+        environment: "test",
+        storage: Layer.merge(DurabilityTesting.layer(yield* DurabilityTesting.make()), BunCrypto.layer),
+        model,
+        revision: "test-build",
+        workspace: () => Effect.succeed(workspace),
+        gateway: {
+          ensureRootSession: gateway.ensureRootSession,
+          handle: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(started, undefined)
+              yield* Deferred.await(release)
+              return new Response("upstream")
+            }),
+        },
+        registry: {
+          runtime: "native",
+          endpoint: "http://127.0.0.1:6420",
+          startEngine: false,
+          startServices: false,
+          noWelcome: true,
+        },
+        startRegistry: false,
+      })
+      const request = new Request("https://rika.test/api/v2/threads/thread/runtime/runs/run", {
+        headers: { authorization: "Bearer token" },
+      })
+      const fetchFiber = yield* Effect.forkChild(Effect.tryPromise(() => host.fetch(request)).pipe(Effect.orDie))
+      yield* Deferred.await(started)
+      const closeFiber = yield* Effect.forkChild(
+        Effect.tryPromise(() => host.close()).pipe(Effect.orDie, Effect.andThen(Deferred.succeed(closed, undefined))),
+      )
+      yield* Effect.yieldNow
+      expect(Option.isNone(yield* Deferred.poll(closed))).toBe(true)
+      yield* Deferred.succeed(release, undefined)
+      expect((yield* Fiber.join(fetchFiber)).status).toBe(200)
+      yield* Fiber.join(closeFiber)
+      expect(Option.isSome(yield* Deferred.poll(closed))).toBe(true)
     }),
   ),
 )

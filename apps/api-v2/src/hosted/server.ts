@@ -1,25 +1,44 @@
+/* oxlint-disable typescript/no-dynamic-delete -- private transport headers are normalized by exact protocol keys. */
 import { Context, Effect, Layer, Option, Redacted } from "effect"
 import { HttpServerRequest } from "effect/unstable/http"
 import { Server } from "generalist/server"
 import type { RuntimeActorServerOptions, ActorRuntimeServices } from "generalist/unstable/rivet"
-import type { Authorization as ServerAuthorization } from "generalist/server"
+import type { Authorization as ServerAuthorization, Principal } from "generalist/server"
 import type { HostOptions } from "./host"
 import { hostEffect } from "./host"
 import { threadPartition, type ThreadPartition } from "./partition"
 import { authorizeResource, type ProductAuthorityService } from "./product-authority"
-import { RIKA_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+import {
+  RIKA_DOWNSTREAM_CREDENTIAL,
+  RIKA_ORIGINAL_AUTHORIZATION,
+  RIKA_ORIGINAL_REQUEST_METHOD,
+  RIKA_ORIGINAL_REQUEST_URL,
+} from "./rivet-protocol"
 
-type ServerUnauthorized = InstanceType<typeof Server["Unauthorized"]>
+type ServerUnauthorized = InstanceType<(typeof Server)["Unauthorized"]>
 
 export const originalRequestForAuthentication = (request: Request) => {
   const url = request.headers.get(RIKA_ORIGINAL_REQUEST_URL)
-  if (url === null) return request
+  if (
+    url === null &&
+    !request.headers.has(RIKA_DOWNSTREAM_CREDENTIAL) &&
+    !request.headers.has(RIKA_ORIGINAL_AUTHORIZATION)
+  )
+    return request
   try {
     const clone = request.clone()
-    const init: RequestInit = { method: clone.method, headers: Object.fromEntries(clone.headers.entries()) }
-    if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
+    const headers = Object.fromEntries(clone.headers.entries())
+    const authorization = headers[RIKA_ORIGINAL_AUTHORIZATION]
+    if (authorization !== undefined) headers.authorization = authorization
+    const method = headers[RIKA_ORIGINAL_REQUEST_METHOD] ?? clone.method
+    delete headers[RIKA_DOWNSTREAM_CREDENTIAL]
+    delete headers[RIKA_ORIGINAL_AUTHORIZATION]
+    delete headers[RIKA_ORIGINAL_REQUEST_METHOD]
+    delete headers[RIKA_ORIGINAL_REQUEST_URL]
+    const init: RequestInit = { method, headers }
+    if (method !== "GET" && method !== "HEAD" && clone.body !== null)
       Object.assign(init, { body: clone.body, duplex: "half" })
-    return new Request(url, init)
+    return new Request(url ?? request.url, init)
   } catch {
     return request
   }
@@ -35,16 +54,22 @@ const authentication = (input: { readonly authority: ProductAuthorityService; re
             Option.match(Context.getOption(context, HttpServerRequest.HttpServerRequest), {
               onNone: () => Effect.fail(Server.Unauthorized.make({})),
               onSome: (serverRequest) =>
-                HttpServerRequest.toWeb(serverRequest).pipe(
-                  Effect.mapError(() => Server.Unauthorized.make({})),
-                ),
+                HttpServerRequest.toWeb(serverRequest).pipe(Effect.mapError(() => Server.Unauthorized.make({}))),
             }),
           )
-          const principal = yield* input.authority.authenticateBearer(Redacted.value(credential), {
-            ownerId: input.partition.ownerId,
-            threadId: input.partition.threadId,
-            request: originalRequestForAuthentication(request),
-          })
+          const downstreamCredential = request.headers.get(RIKA_DOWNSTREAM_CREDENTIAL)
+          let principal: Principal | undefined
+          if (downstreamCredential === null)
+            principal = yield* input.authority.authenticateBearer(Redacted.value(credential), {
+              ownerId: input.partition.ownerId,
+              threadId: input.partition.threadId,
+              request: originalRequestForAuthentication(request),
+            })
+          else if (input.authority.authenticateDownstream !== undefined)
+            principal = yield* input.authority.authenticateDownstream(downstreamCredential, {
+              ownerId: input.partition.ownerId,
+              threadId: input.partition.threadId,
+            })
           if (principal === undefined || principal.tenantId !== input.partition.ownerId)
             return yield* Server.Unauthorized.make({})
           return yield* Effect.provideService(httpEffect, Server.CurrentPrincipal, principal)

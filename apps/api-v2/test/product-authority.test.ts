@@ -73,55 +73,110 @@ const clientAuthority = (
 
 it.effect("adapts the released identity/device/product authorities to Generalist policy", () =>
   Effect.gen(function* () {
-  const calls: Array<string> = []
-  const authority = makeRepositoryProductAuthority({
-    identity,
-    devices,
-    product,
-    clientAuthority: clientAuthority(() => {
-      calls.push("authorize")
-      return Effect.void
-    }),
-    environment: "test",
-    binding: () => Effect.succeed(canonicalBinding),
-  })
+    const calls: Array<string> = []
+    const authority = makeRepositoryProductAuthority({
+      identity,
+      devices,
+      product,
+      clientAuthority: clientAuthority(() => {
+        calls.push("authorize")
+        return Effect.void
+      }),
+      environment: "test",
+      binding: () => Effect.succeed(canonicalBinding),
+    })
 
-  const principal = yield* authority.authenticateBearer("token", { threadId: "thread" })
-  expect(principal).toEqual({
-    id: "rika-client:user:owner:client:device",
-    tenantId: "owner",
-    role: "controller",
-  })
-  const binding = yield* authority.threadBinding("thread", "owner")
-  expect(binding?.partition.rootSessionId).toBe("rika-v2:owner:thread")
-  expect(binding?.placement).toEqual({ _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" })
-  const decodedPrincipal = yield* Schema.decodeEffect(Server.Principal)(principal!)
-  const allowed = yield* authority.authorize({
-    principal: decodedPrincipal,
-    resource: { type: "session", id: binding!.partition.rootSessionId },
-    action: "mutate",
-  })
-  expect(allowed).toBe(true)
-  expect(calls).toEqual(["authorize"])
+    const principal = yield* authority.authenticateBearer("token", { threadId: "thread" })
+    expect(principal).toEqual({
+      id: "rika-client:user:owner:client:device",
+      tenantId: "owner",
+      role: "controller",
+    })
+    const binding = yield* authority.threadBinding("thread", "owner")
+    expect(binding?.partition.rootSessionId).toBe("rika-v2:owner:thread")
+    expect(binding?.placement).toEqual({ _tag: "Runner", checkoutFingerprint: "checkout", workspaceId: "workspace" })
+    const decodedPrincipal = yield* Schema.decodeEffect(Server.Principal)(principal!)
+    const allowed = yield* authority.authorize({
+      principal: decodedPrincipal,
+      resource: { type: "session", id: binding!.partition.rootSessionId },
+      action: "mutate",
+    })
+    expect(allowed).toBe(true)
+    expect(calls).toEqual(["authorize"])
+  }),
+)
+
+it.effect("issues a scoped downstream credential after DPoP edge authentication", () =>
+  Effect.gen(function* () {
+    let authenticatedRequest:
+      | {
+          readonly method: string
+          readonly url: string
+          readonly authorization: string | null
+          readonly dpop: string | null
+        }
+      | undefined
+    const authority = makeRepositoryProductAuthority({
+      identity: {
+        ...identity,
+        identify: (request) =>
+          Effect.sync(() => {
+            authenticatedRequest = {
+              method: request.method,
+              url: request.url,
+              authorization: request.headers.get("authorization"),
+              dpop: request.headers.get("dpop"),
+            }
+            return { userId: "user", clientId: "client", dpopJkt: "jkt" }
+          }),
+      },
+      devices,
+      product,
+      clientAuthority: clientAuthority(() => Effect.void),
+      environment: "test",
+      binding: () => Effect.succeed(canonicalBinding),
+    })
+    const request = new Request("https://rika.test/api/v2/threads/thread/runtime/runs/run-1?cursor=abc", {
+      method: "POST",
+      headers: { authorization: "DPoP access-token", dpop: "proof" },
+      body: "prompt",
+    })
+    const principal = yield* authority.authenticateBearer("access-token", {
+      ownerId: "owner",
+      threadId: "thread",
+      request,
+    })
+    expect(principal).toBeDefined()
+    expect(authenticatedRequest?.method).toBe("POST")
+    expect(authenticatedRequest?.url).toBe("https://rika.test/api/v2/threads/thread/runtime/runs/run-1?cursor=abc")
+    expect(authenticatedRequest?.authorization).toBe("DPoP access-token")
+    expect(authenticatedRequest?.dpop).toBe("proof")
+    const downstreamCredential = authority.downstreamCredential?.(principal!)
+    expect(downstreamCredential).toMatch(/^rika-ds-/)
+    const downstream = yield* authority.authenticateDownstream!(downstreamCredential!, {
+      ownerId: "owner",
+      threadId: "thread",
+    })
+    expect(downstream).toEqual(principal)
   }),
 )
 
 it.effect("rejects a token whose active CLI device was revoked", () =>
   Effect.gen(function* () {
-  const revokedDevices = {
-    ...devices,
-    authenticate: () => Effect.succeed(Option.none<string>()).pipe(Effect.map(Option.getOrUndefined)),
-  }
-  const authority = makeRepositoryProductAuthority({
-    identity,
-    devices: revokedDevices,
-    product,
-    clientAuthority: clientAuthority(() => Effect.void),
-    environment: "test",
-    binding: () => Effect.succeed(canonicalBinding),
-  })
-  const principal = yield* authority.authenticateBearer("token", { threadId: "thread" })
-  expect(principal).toBeUndefined()
+    const revokedDevices = {
+      ...devices,
+      authenticate: () => Effect.succeed(Option.none<string>()).pipe(Effect.map(Option.getOrUndefined)),
+    }
+    const authority = makeRepositoryProductAuthority({
+      identity,
+      devices: revokedDevices,
+      product,
+      clientAuthority: clientAuthority(() => Effect.void),
+      environment: "test",
+      binding: () => Effect.succeed(canonicalBinding),
+    })
+    const principal = yield* authority.authenticateBearer("token", { threadId: "thread" })
+    expect(principal).toBeUndefined()
   }),
 )
 

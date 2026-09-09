@@ -1,9 +1,15 @@
+/* oxlint-disable typescript/no-dynamic-delete -- private transport headers are normalized by exact protocol keys. */
 import { Effect, Schema } from "effect"
 import type { Principal, Resource } from "generalist/server"
 import { threadPartition } from "./partition"
 import { authorizeResource, type ProductAuthorityService } from "./product-authority"
 import type { RuntimeGateway, RuntimeWebSocket } from "./runtime-gateway"
-import { RIKA_ORIGINAL_REQUEST_URL } from "./rivet-protocol"
+import {
+  RIKA_DOWNSTREAM_CREDENTIAL,
+  RIKA_ORIGINAL_AUTHORIZATION,
+  RIKA_ORIGINAL_REQUEST_METHOD,
+  RIKA_ORIGINAL_REQUEST_URL,
+} from "./rivet-protocol"
 
 export class ApiV2HttpError extends Schema.TaggedError<ApiV2HttpError>()("RikaApiV2HttpError", {
   status: Schema.Int,
@@ -19,7 +25,7 @@ const errorResponse = (error: ApiV2HttpError) =>
 const bearer = (request: Request) => {
   const value = request.headers.get("authorization")
   if (value === null) return undefined
-  const match = /^Bearer (\S+)$/.exec(value)
+  const match = /^(?:Bearer|DPoP) (\S+)$/i.exec(value)
   return match?.[1]
 }
 
@@ -46,10 +52,27 @@ const runtimePath = (pathname: string) => {
   return { threadId, upstreamPath: suffix }
 }
 
-const upstreamRequest = (request: Request, pathname: string) => {
+const edgeRequest = (request: Request) => {
+  const clone = request.clone()
+  const headers = Object.fromEntries(clone.headers.entries())
+  delete headers[RIKA_DOWNSTREAM_CREDENTIAL]
+  delete headers[RIKA_ORIGINAL_AUTHORIZATION]
+  delete headers[RIKA_ORIGINAL_REQUEST_METHOD]
+  delete headers[RIKA_ORIGINAL_REQUEST_URL]
+  const init: RequestInit = { method: clone.method, headers }
+  if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
+    Object.assign(init, { body: clone.body, duplex: "half" })
+  return new Request(request.url, init)
+}
+
+const upstreamRequest = (request: Request, pathname: string, downstreamCredential: string | undefined) => {
   const clone = request.clone()
   const headers = Object.fromEntries(clone.headers.entries())
   headers[RIKA_ORIGINAL_REQUEST_URL] = request.url
+  headers[RIKA_ORIGINAL_REQUEST_METHOD] = clone.method
+  delete headers[RIKA_ORIGINAL_AUTHORIZATION]
+  if (downstreamCredential === undefined) delete headers[RIKA_DOWNSTREAM_CREDENTIAL]
+  else headers[RIKA_DOWNSTREAM_CREDENTIAL] = downstreamCredential
   const init: RequestInit = { method: clone.method, headers }
   if (clone.method !== "GET" && clone.method !== "HEAD" && clone.body !== null)
     Object.assign(init, { body: clone.body, duplex: "half" })
@@ -172,7 +195,7 @@ const handle = (input: {
   readonly websocket?: RuntimeWebSocket
 }) =>
   Effect.gen(function* () {
-    const { request } = input
+    const request = edgeRequest(input.request)
     const pathname = new URL(request.url).pathname
     if (pathname === "/healthz") return new Response(healthBody, { status: 200 })
 
@@ -192,12 +215,13 @@ const handle = (input: {
       requestedThreadId,
       resourceThreadId,
     })
+    const downstreamCredential = input.authority.downstreamCredential?.(principal)
     if (productSessionThreadId !== undefined)
       return yield* handleSessionRequest({
         authority: input.authority,
         gateway: input.gateway,
         environment: input.environment,
-        request: route === undefined ? request : upstreamRequest(request, upstreamPath),
+        request: upstreamRequest(request, upstreamPath, downstreamCredential),
         principal,
         threadId: productSessionThreadId,
       })
@@ -207,7 +231,7 @@ const handle = (input: {
       authority: input.authority,
       gateway: input.gateway,
       environment: input.environment,
-      request: route === undefined ? request : upstreamRequest(request, upstreamPath),
+      request: upstreamRequest(request, upstreamPath, downstreamCredential),
       principal,
       resource,
       threadId: resourceThreadId,

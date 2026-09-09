@@ -103,3 +103,56 @@ it.effect("routes opaque Runs and child Sessions through an explicit Thread runt
     )
   }),
 )
+
+it.effect("passes DPoP credentials and the original request to repository authority", () =>
+  Effect.gen(function* () {
+    let capturedToken: string | undefined
+    let capturedRequest: Request | undefined
+    let forwarded: Request | undefined
+    const response = yield* handleApiV2Request({
+      authority: {
+        ...authority(true),
+        authenticateBearer: (token, context) => {
+          capturedToken = token
+          capturedRequest = context?.request
+          return Effect.succeed(principal)
+        },
+        downstreamCredential: () => "rika-ds-test",
+      },
+      gateway: {
+        ensureRootSession: () => Effect.succeed({ sessionId: partition.rootSessionId, created: false }),
+        handle: (_partition, forwardedRequest) => {
+          forwarded = forwardedRequest
+          return Effect.succeed(new Response("upstream"))
+        },
+      },
+      environment: "test",
+      request: new Request("https://rika.test/api/v2/threads/thread/runtime/runs/opaque?cursor=abc", {
+        method: "POST",
+        headers: {
+          authorization: "DPoP access-token",
+          dpop: "proof",
+          "x-rika-downstream-credential": "attacker-supplied",
+          "x-rika-original-request-method": "GET",
+          "content-type": "application/json",
+        },
+        body: '{"prompt":"hello"}',
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(capturedToken).toBe("access-token")
+    expect(capturedRequest?.method).toBe("POST")
+    expect(capturedRequest?.url).toBe("https://rika.test/api/v2/threads/thread/runtime/runs/opaque?cursor=abc")
+    expect(capturedRequest?.headers.get("authorization")).toBe("DPoP access-token")
+    expect(capturedRequest?.headers.get("dpop")).toBe("proof")
+    expect(capturedRequest?.headers.get("content-type")).toBe("application/json")
+    expect(capturedRequest?.headers.get("x-rika-downstream-credential")).toBeNull()
+    expect(forwarded?.headers.get("x-rika-downstream-credential")).toBe("rika-ds-test")
+    expect(forwarded?.headers.get("x-rika-original-request-method")).toBe("POST")
+    const capturedBody = yield* Effect.tryPromise(() =>
+      // ast-grep-ignore: effect-prefer-promise-composition -- test consumes a foreign Fetch body.
+      capturedRequest === undefined ? Promise.resolve(undefined) : capturedRequest.clone().text(),
+    )
+    expect(capturedBody).toBe('{"prompt":"hello"}')
+  }),
+)
