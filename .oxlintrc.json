@@ -217,6 +217,12 @@
         "effecttsgo/missing-pipeable-signature": "off",
         "no-await-in-loop": "off"
       }
+    },
+    {
+      "files": ["alchemy.run.ts", "vitest.config.ts"],
+      "rules": {
+        "effecttsgo/duplicate-package": "off"
+      }
     }
   ],
   "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "tools/oxlint/anti-slop"]
