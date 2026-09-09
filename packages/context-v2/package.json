@@ -18,6 +18,7 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
+    "@rika/execution-v2": "workspace:*",
     "effect": "4.0.0-rc.112",
     "generalist": "0.65.0"
   },

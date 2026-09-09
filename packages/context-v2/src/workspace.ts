@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { SkillCatalog } from "generalist"
-import { WorkspaceBinding, type GuidanceFile } from "./contract"
+import { WorkspaceBinding } from "@rika/execution-v2"
+import type { GuidanceFile } from "./contract"
 
 export class WorkspaceReaderError extends Schema.TaggedError<WorkspaceReaderError>()("RikaContextWorkspaceReaderError", {
   reason: Schema.Literals(["binding", "unavailable", "forbidden", "malformed"]),

@@ -1,5 +1,8 @@
 import { Instructions, Pins } from "generalist"
+import { WorkspaceBinding } from "@rika/execution-v2"
 import { Schema } from "effect"
+
+export { WorkspaceBinding }
 
 const boundedString = (max: number) => Schema.String.pipe(Schema.check(Schema.isMaxLength(max)))
 const identifier = Schema.String.pipe(Schema.check(Schema.isNonEmpty()), Schema.check(Schema.isMaxLength(512)))
@@ -17,13 +20,6 @@ export const SecureCredentialReference = Schema.Struct({
   reference: Schema.String.pipe(Schema.check(Schema.isPattern(/^credential:\/\/[A-Za-z0-9._:/-]+$/))),
 })
 export type SecureCredentialReference = typeof SecureCredentialReference.Type
-
-export const WorkspaceBinding = Schema.Struct({
-  workspaceId: identifier,
-  lineageId: identifier,
-  generation: identifier,
-})
-export type WorkspaceBinding = typeof WorkspaceBinding.Type
 
 export const GuidanceFile = Schema.Struct({
   path: identifier,

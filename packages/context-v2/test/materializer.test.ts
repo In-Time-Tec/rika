@@ -5,6 +5,7 @@ import { BunCrypto } from "@effect/platform-bun"
 /* oxlint-disable typescript/no-unnecessary-type-assertion -- overload-preserving provider wrappers require explicit service signatures. */
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber, Layer, Ref, Schema } from "effect"
+import { sameBinding, WorkspaceBinding } from "@rika/execution-v2"
 import { Agent, Approvals, ModelRegistry, Permissions, SkillCatalog, ToolContext } from "generalist"
 import * as Components from "generalist/components"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
@@ -33,9 +34,24 @@ import {
   settingsReceipt,
   transition,
 } from "../src/materializer"
-import { layerTest } from "../src/workspace"
+import { WorkspaceReaderError, layerTest } from "../src/workspace"
 
-const binding = { workspaceId: "workspace-1", lineageId: "lineage-1", generation: "generation-1" } as const
+const binding = Schema.decodeSync(WorkspaceBinding)({
+  workspaceId: "workspace-1",
+  assignmentId: "assignment-1",
+  generation: 1,
+  placement: { _tag: "Runner", workspaceId: "workspace-1", checkoutFingerprint: "checkout-1" },
+  buildId: "build-1",
+  protocolVersion: 1,
+})
+const orbBinding = Schema.decodeSync(WorkspaceBinding)({
+  workspaceId: "workspace-orb",
+  assignmentId: "assignment-orb",
+  generation: 2,
+  placement: { _tag: "Orb", workspaceId: "workspace-orb", lineageId: "lineage-orb" },
+  buildId: "build-orb",
+  protocolVersion: 1,
+})
 const model: ModelConfiguration = {
   selection: { provider: "test", model: "test-model" },
   settings: { reasoningEffort: "low" },
@@ -72,6 +88,54 @@ const discoverWith = (skills: ReadonlyArray<SkillCatalog.Skill>, guidance = "ini
         ),
       ),
     )
+
+it.effect("passes authenticated Runner and Orb bindings to the reader without substitution", () =>
+  Effect.gen(function* () {
+    const captured: Array<WorkspaceBinding> = []
+    const bindingError = (expected: WorkspaceBinding, received: WorkspaceBinding) =>
+      WorkspaceReaderError.make({
+        reason: "binding",
+        message: `Reader binding mismatch for ${expected.assignmentId}: received ${received.assignmentId}`,
+      })
+    const discoverFor = (expected: WorkspaceBinding, received: WorkspaceBinding = expected) =>
+      discover({
+        sessionId: `session-${expected.assignmentId}`,
+        guidanceScope: `scope-${expected.assignmentId}`,
+        binding: received,
+        capturedAt: "2026-09-09T12:00:00.000Z",
+        model,
+        tools: [],
+      }).pipe(
+        Effect.provide(
+          contextLayer.pipe(
+            Layer.provide(
+              layerTest({
+                readGuidance: (requested) => {
+                  captured.push(requested)
+                  return sameBinding(requested, expected)
+                    ? Effect.succeed([{ path: "AGENTS.md", content: "authenticated guidance" }])
+                    : Effect.fail(bindingError(expected, requested))
+                },
+                listSkills: (requested) => {
+                  captured.push(requested)
+                  return sameBinding(requested, expected) ? Effect.succeed([]) : Effect.fail(bindingError(expected, requested))
+                },
+              }),
+            ),
+          ),
+        ),
+      )
+
+    const runner = yield* discoverFor(binding)
+    const orb = yield* discoverFor(orbBinding)
+    expect(runner.workspace).toEqual(binding)
+    expect(orb.workspace).toEqual(orbBinding)
+    expect(captured).toEqual([binding, binding, orbBinding, orbBinding])
+
+    const mismatch = yield* Effect.flip(discoverFor(binding, orbBinding))
+    expect(mismatch.reason).toBe("reader")
+    expect(captured.at(-1)).toEqual(orbBinding)
+  }))
 
 it.effect("captures workspace guidance from the explicit binding and retains it after changes", () =>
   Effect.gen(function* () {
@@ -289,7 +353,14 @@ it.effect("registers session-owned materialization with the released Generalist 
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
 
-const runtimeBinding = { workspaceId: "runtime-workspace", lineageId: "runtime-lineage", generation: "runtime-generation" } as const
+const runtimeBinding = Schema.decodeSync(WorkspaceBinding)({
+  workspaceId: "runtime-workspace",
+  assignmentId: "runtime-assignment",
+  generation: 1,
+  placement: { _tag: "Runner", workspaceId: "runtime-workspace", checkoutFingerprint: "runtime-checkout" },
+  buildId: "runtime-build",
+  protocolVersion: 1,
+})
 const runtimeModel: ModelConfiguration = {
   selection: { provider: "test", model: "scripted" },
   settings: { temperature: 0.25, maxOutputTokens: 128, reasoningEffort: "low" },
