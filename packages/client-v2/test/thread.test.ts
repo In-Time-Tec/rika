@@ -59,6 +59,15 @@ const product = (): ProductClient => ({
   ensureSession: () => Effect.succeed({ sessionId: "session", created: false }),
 })
 
+const retainedChild = {
+  id: "child-session",
+  rootSessionId: "session",
+  parentSessionId: "session",
+  parentRunId: "run",
+  initialRunId: "child-run",
+  depth: 1,
+} as const
+
 const waitForDetached = (millis: number) =>
   Effect.callback<void>((resume) => {
     // ast-grep-ignore: effect-prefer-scheduling -- this fixture waits for an owned connection fiber to start.
@@ -376,6 +385,126 @@ it.effect("opens a retained child lazily while preserving root and child history
   })
 })
 
+it.effect("rejects an in-flight child open after Thread selection changes", () => {
+  const snapshotStarted = Deferred.makeUnsafe<void>()
+  const releaseSnapshot = Deferred.makeUnsafe<void>()
+  const execution = {
+    raw: {},
+    snapshot: ({ sessionId }: { readonly sessionId: string }) =>
+      sessionId === "child-session"
+        ? Effect.void.pipe(
+            Effect.andThen(Deferred.succeed(snapshotStarted, undefined)),
+            Effect.andThen(Deferred.await(releaseSnapshot)),
+            Effect.as(snapshot),
+          )
+        : Effect.succeed({ ...snapshot, session: { ...snapshot.session, id: sessionId } }),
+    history: () => Effect.succeed({ leafId: null, entries: [], nextLeafId: null }),
+    family: ({ sessionId }: { readonly sessionId: string }) =>
+      Effect.succeed({ rootSessionId: sessionId, at: 1, sessions: sessionId === "session" ? [retainedChild] : [], nextBefore: null }),
+    submit: () => Effect.succeed({ id: "receipt", revision: 1 }),
+    updateInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    removeInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    steer: () => Effect.void,
+    cancel: () => Effect.void,
+    control: () => Effect.void,
+    runs: () => Effect.succeed([]),
+    connect: () => Effect.succeed({ snapshot, events: Stream.empty, status: Stream.empty, exhausted: Effect.never, cancel: () => Effect.void }),
+    subscribe: () => Stream.empty,
+  } as unknown as ExecutionClient
+  const productForSwitch: ProductClient = {
+    ...product(),
+    listThreads: () =>
+      Effect.succeed({
+        threads: [
+          { id: "thread", title: "Hosted", target: "runner" as const },
+          { id: "other", title: "Other", target: "runner" as const },
+        ],
+        nextCursor: null,
+      }),
+    thread: (id) => Effect.succeed({ id, title: id, target: "runner" as const }),
+    ensureSession: (threadId) => Effect.succeed({ sessionId: threadId === "thread" ? "session" : "other-session", created: false }),
+  }
+  const client = makeThreadClient({ product: productForSwitch, execution, webSocketConstructor: () => ({}) as WebSocket })
+  return Effect.gen(function* () {
+    yield* client.selectThread("thread")
+    const opening = yield* client.openChildSession("child-session").pipe(Effect.forkChild)
+    yield* Deferred.await(snapshotStarted)
+    yield* client.selectThread("other")
+    yield* Deferred.succeed(releaseSnapshot, undefined)
+    const result = yield* Fiber.join(opening).pipe(Effect.result)
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") expect(result.failure.kind).toBe("selection")
+    expect(client.state.selectedThreadId).toBe("other")
+    expect(client.state.focusedSessionId).toBeUndefined()
+    yield* client.dispose
+  })
+})
+
+it.effect("subscribes to the focused child and stops that connection on back", () => {
+  const rootSnapshot = snapshotWithConversation({ leafId: "root", entries: [] })
+  const childSnapshot = Schema.decodeSync(Server.SessionSnapshot)({
+    ...rootSnapshot,
+    session: { ...rootSnapshot.session, id: "child-session", title: "Child" },
+  })
+  const childEvents = Effect.runSync(Queue.unbounded<ConnectionEvent>())
+  const connections: string[] = []
+  const family = { rootSessionId: "session", at: 1, sessions: [retainedChild], nextBefore: null }
+  const connectionFor = (sessionId: string) => ({
+    snapshot: sessionId === "session" ? rootSnapshot : childSnapshot,
+    events: sessionId === "session" ? Stream.empty : Stream.fromQueue(childEvents),
+    status: Stream.empty,
+    exhausted: Effect.never,
+    cancel: () => Effect.void,
+  })
+  const execution = {
+    raw: {},
+    snapshot: ({ sessionId }: { readonly sessionId: string }) => Effect.succeed(sessionId === "session" ? rootSnapshot : childSnapshot),
+    history: () => Effect.succeed({ leafId: null, entries: [], nextLeafId: null }),
+    family: () => Effect.succeed(family),
+    submit: () => Effect.succeed({ id: "receipt", revision: 1 }),
+    updateInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    removeInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    steer: () => Effect.void,
+    cancel: () => Effect.void,
+    control: () => Effect.void,
+    runs: () => Effect.succeed([]),
+    connect: ({ sessionId }: { readonly sessionId: string }) =>
+      Effect.sync(() => {
+        connections.push(sessionId)
+        return connectionFor(sessionId)
+      }),
+    subscribe: () => Stream.empty,
+  } as unknown as ExecutionClient
+  const client = makeThreadClient({ product: product(), execution, webSocketConstructor: () => ({}) as WebSocket })
+  return Effect.gen(function* () {
+    yield* client.selectThread("thread")
+    yield* waitForDetached(10)
+    yield* client.openChildSession("child-session")
+    yield* waitForDetached(10)
+    expect(connections).toEqual(["session", "child-session"])
+    yield* Queue.offer(childEvents, {
+      _tag: "ConnectionSnapshot",
+      epoch: 2,
+      snapshot: {
+        ...childSnapshot,
+        cursor: 1,
+        conversation: {
+          leafId: "child-new",
+          entries: [conversationEntry("child-event", null)],
+        },
+      },
+    })
+    yield* waitForDetached(10)
+    expect(client.state.projection?.sessionId).toBe("child-session")
+    expect(client.state.projection?.snapshot.conversation.entries.map((entry) => entry.id)).toEqual(["child-event"])
+    yield* client.backToThread()
+    yield* client.openChildSession("child-session")
+    yield* waitForDetached(10)
+    expect(connections).toEqual(["session", "child-session", "child-session"])
+    yield* client.dispose
+  })
+})
+
 it.effect("refreshes family membership on reconnect without changing Thread selection", () => {
   const familyCalls: number[] = []
   const oldChild = {
@@ -420,14 +549,13 @@ it.effect("refreshes family membership on reconnect without changing Thread sele
     yield* client.selectThread("thread")
     yield* client.openChildSession("old-child")
     yield* waitForDetached(25)
-    expect(familyCalls).toHaveLength(2)
+    expect(familyCalls).toHaveLength(3)
     expect(client.state.selectedThreadId).toBe("thread")
-    expect(client.state.focusedSessionId).toBeUndefined()
-    expect(client.state.projection?.family?.sessions.map((session) => session.id)).toEqual(["new-child"])
-    const removed = yield* Effect.result(client.openChildSession("old-child"))
-    expect(removed._tag).toBe("Failure")
-    const staleFollowUp = yield* Effect.result(client.followUp("stale", "old-child"))
-    expect(staleFollowUp._tag).toBe("Failure")
+    expect(client.state.focusedSessionId).toBe("old-child")
+    expect(client.state.projection?.family?.at).toBe(2)
+    expect(client.state.projection?.family?.sessions.map((session) => session.id)).toEqual(["old-child", "new-child"])
+    const retainedFollowUp = yield* client.followUp("retained", "old-child")
+    expect(retainedFollowUp.status).toBe("accepted")
     yield* client.openChildSession("new-child")
     const followUp = yield* client.followUp("current", "new-child")
     expect(followUp.status).toBe("accepted")

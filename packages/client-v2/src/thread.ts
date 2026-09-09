@@ -173,12 +173,16 @@ type FamilyPage = {
   readonly nextBefore: number | null
 }
 
-const familyProjection = (page: FamilyPage, previous?: FamilyProjection): FamilyProjection => {
+const familyProjection = (
+  page: FamilyPage,
+  previous?: FamilyProjection,
+  preserveAt = true,
+): FamilyProjection => {
   const sessions = new Map((previous?.sessions ?? []).map((session) => [session.id, session]))
   for (const session of page.sessions) sessions.set(session.id, session)
   return {
     rootSessionId: page.rootSessionId,
-    at: previous?.at ?? page.at,
+    at: preserveAt ? (previous?.at ?? page.at) : page.at,
     sessions: [...sessions.values()],
     nextBefore: page.nextBefore,
   }
@@ -311,12 +315,14 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   let current: ThreadClientState = initialState
   let serial = 0
   let disposed = false
-  let connectionFiber: Fiber.Fiber<void, never> | undefined
+  const connectionFibers = new Map<string, Fiber.Fiber<void, never>>()
   const connectionScope = Scope.makeUnsafe()
   let selectedExecution = execution
   let historyInFlight = false
   let familyInFlight = false
   let focusedSessionId: string | undefined
+  let childOpenSerial = 0
+  const connectedSessions = new Set<string>()
   let rootFamily: FamilyProjection | undefined
   const sessionProjections = new Map<
     string,
@@ -374,23 +380,42 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
         if (current.projection?.sessionId === eventSessionId) updateProjection(next)
       }
     })
-  const observeStatus = (status: Parameters<typeof applyConnectionStatus>[1], epoch: number): Effect.Effect<void> =>
+  const observeStatus = (
+    status: Parameters<typeof applyConnectionStatus>[1],
+    epoch: number,
+    sessionId: string,
+  ): Effect.Effect<void> =>
     Effect.gen(function* () {
       yield* Effect.sync(() => {
-        if (disposed || epoch !== current.selectionEpoch || current.projection === undefined) return
-        const next = applyConnectionStatus(current.projection, status)
+        if (disposed || epoch !== current.selectionEpoch) return
+        const cached = sessionProjections.get(sessionId)
+        const projection = cached?.projection ?? (current.projection?.sessionId === sessionId ? current.projection : undefined)
+        const next = projection === undefined ? undefined : applyConnectionStatus(projection, status)
+        if (next !== undefined)
+          sessionProjections.set(sessionId, { execution: cached?.execution ?? selectedExecution, projection: next })
         let connectionState: ThreadClientState["connection"] = "connecting"
         if (status._tag === "Connected") connectionState = "connected"
         else if (status._tag === "Retrying") connectionState = "reconnecting"
         else if (status._tag === "Disconnected") connectionState = "disconnected"
         publish({
           ...current,
-          projection: next,
+          ...(current.projection?.sessionId === sessionId && next !== undefined ? { projection: next } : {}),
           connection: connectionState,
-          threads: current.threads.map((thread) => (thread.id === next.thread.id ? next.thread : thread)),
+          ...(next === undefined || current.projection?.sessionId !== sessionId
+            ? {}
+            : { threads: current.threads.map((thread) => (thread.id === next.thread.id ? next.thread : thread)) }),
         })
       })
-      if (status._tag !== "Retrying" || disposed || epoch !== current.selectionEpoch || rootFamily === undefined) return
+      if (
+        (status._tag !== "Retrying" && status._tag !== "Connected") ||
+        disposed ||
+        epoch !== current.selectionEpoch ||
+        rootFamily === undefined
+      )
+        return
+      const firstConnection = status._tag === "Connected" && connectedSessions.has(sessionId) === false
+      if (status._tag === "Connected") connectedSessions.add(sessionId)
+      if (firstConnection) return
       yield* refreshFamily(selectedExecution, rootFamily.rootSessionId, epoch).pipe(
         Effect.catch((error) =>
           Effect.sync(() => {
@@ -400,11 +425,20 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
         ),
       )
     })
-  const stopConnection = (): Effect.Effect<void> => {
-    if (connectionFiber === undefined) return Effect.void
-    const fiber = connectionFiber
-    connectionFiber = undefined
-    return Fiber.interrupt(fiber).pipe(Effect.asVoid)
+  const stopConnection = (sessionId?: string): Effect.Effect<void> => {
+    const fibers =
+      sessionId === undefined
+        ? [...connectionFibers.entries()]
+        : connectionFibers.has(sessionId)
+          ? [[sessionId, connectionFibers.get(sessionId)!] as const]
+          : []
+    if (fibers.length === 0) return Effect.void
+    for (const [id] of fibers) connectionFibers.delete(id)
+    return Effect.forEach(
+      fibers.map(([, fiber]) => fiber),
+      (fiber) => Fiber.interrupt(fiber),
+      { discard: true },
+    )
   }
   const runConnection = (selected: ExecutionClient, sessionId: string, epoch: number): Effect.Effect<void> =>
     Effect.scoped(
@@ -424,7 +458,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
         yield* Effect.all(
           [
             connected.events.pipe(Stream.runForEach((event) => observeEvent(event, epoch))),
-            connected.status.pipe(Stream.runForEach((status) => observeStatus(status, epoch))),
+            connected.status.pipe(Stream.runForEach((status) => observeStatus(status, epoch, sessionId))),
           ],
           { concurrency: "unbounded" },
         )
@@ -444,7 +478,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       Effect.flatMap((fiber) =>
         Effect.sync(() => {
           if (!disposed && epoch === current.selectionEpoch) {
-            connectionFiber = fiber
+            connectionFibers.set(sessionId, fiber)
             return true
           }
           return false
@@ -493,7 +527,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       Effect.tap((value) =>
         Effect.sync(() => {
           if (disposed || epoch !== current.selectionEpoch) return
-          rootFamily = familyProjection(value)
+            rootFamily = familyProjection(value, rootFamily, false)
           for (const [sessionId, cached] of sessionProjections) {
             const projection = projectSnapshot({
               sessionId: cached.projection.sessionId,
@@ -527,6 +561,8 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     serial += 1
     const epoch = current.selectionEpoch + 1
     yield* stopConnection()
+    connectedSessions.clear()
+    childOpenSerial += 1
     rootFamily = undefined
     focusedSessionId = undefined
     sessionProjections.clear()
@@ -778,9 +814,10 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       })
     const root = sessionProjections.get(family.rootSessionId)
     if (root === undefined) return yield* staleSelection("session.open")
+    const epoch = current.selectionEpoch
+    const openSerial = ++childOpenSerial
     const cached = sessionProjections.get(sessionId)
-    const projection =
-      cached?.projection ??
+    const projection = cached?.projection ??
       projectSnapshot({
         sessionId,
         threadId: root.projection.thread.id,
@@ -790,13 +827,31 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
         target: root.projection.thread.target,
         family,
       })
+    if (
+      disposed ||
+      epoch !== current.selectionEpoch ||
+      openSerial !== childOpenSerial ||
+      rootFamily !== family ||
+      current.selectedThreadId !== root.projection.thread.id
+    )
+      return yield* staleSelection("session.open")
+    const previousFocusedSessionId = focusedSessionId
+    if (previousFocusedSessionId !== undefined && previousFocusedSessionId !== sessionId) {
+      yield* stopConnection(previousFocusedSessionId)
+      connectedSessions.delete(previousFocusedSessionId)
+    }
     sessionProjections.set(sessionId, { execution: root.execution, projection })
     focusedSessionId = sessionId
     updateProjection(projection)
     publish({ ...current, focusedSessionId: sessionId, notice: "" })
+    yield* connectForSelection(root.execution, sessionId, epoch)
   })
   const backToThread = Effect.fn("RikaClientV2.backToThread")(function* () {
     if (focusedSessionId === undefined) return
+    const previousFocusedSessionId = focusedSessionId
+    childOpenSerial += 1
+    yield* stopConnection(previousFocusedSessionId)
+    connectedSessions.delete(previousFocusedSessionId)
     const rootSessionId = rootFamily?.rootSessionId
     const root = rootSessionId === undefined ? undefined : sessionProjections.get(rootSessionId)
     if (root === undefined) return yield* staleSelection("session.back")
@@ -855,6 +910,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
   const dispose = Effect.sync(() => {
     if (disposed) return
     disposed = true
+    childOpenSerial += 1
     listeners.clear()
   }).pipe(Effect.andThen(Effect.suspend(stopConnection)), Effect.andThen(Scope.close(connectionScope, Exit.void)))
   return {
