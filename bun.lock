@@ -75,6 +75,7 @@
       "dependencies": {
         "@aws-sdk/client-s3": "3.1124.0",
         "@effect/platform-bun": "4.0.0-rc.112",
+        "@rika/client-v2": "workspace:*",
         "@rika/context-v2": "workspace:*",
         "@rika/execution-v2": "workspace:*",
         "@rika/identity": "workspace:*",
@@ -140,6 +141,7 @@
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
         "@opentui/solid": "catalog:",
+        "@rika/client-v2": "workspace:*",
         "@rika/terminal": "workspace:*",
         "effect": "catalog:",
         "solid-js": "catalog:",
@@ -169,6 +171,20 @@
         "typescript": "catalog:",
         "vite": "catalog:",
         "vitest": "catalog:",
+      },
+    },
+    "packages/client-v2": {
+      "name": "@rika/client-v2",
+      "version": "0.1.0",
+      "dependencies": {
+        "effect": "4.0.0-rc.112",
+        "generalist": "0.65.0",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-rc.112",
+        "@types/bun": "1.4.0",
+        "typescript": "7.0.2",
+        "vitest": "4.1.11",
       },
     },
     "packages/configuration": {
@@ -1119,6 +1135,8 @@
     "@rika/api-v2": ["@rika/api-v2@workspace:apps/api-v2"],
 
     "@rika/cli": ["@rika/cli@workspace:apps/rika"],
+
+    "@rika/client-v2": ["@rika/client-v2@workspace:packages/client-v2"],
 
     "@rika/configuration": ["@rika/configuration@workspace:packages/configuration"],
 
@@ -2686,6 +2704,8 @@
 
     "@rika/api-v2/generalist": ["generalist@0.65.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/client-s3": "3.1124.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@rivet-dev/agentos": "0.2.19", "@smithy/fetch-http-handler": "5.7.2", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "modal": "0.10.0", "rivetkit": "2.3.15", "vitest": "4.1.11", "yjs": "13.6.32" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/client-s3", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/vitest", "@modelcontextprotocol/sdk", "@rivet-dev/agentos", "@smithy/fetch-http-handler", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "modal", "rivetkit", "vitest", "yjs"] }, "sha512-c08Dm9pr8r9JSxJpKf5XsrVL10amTbZ9kb2FYeS706XO8fcosq+JjeNC5CyS2abz381ua6BbyuchYv1/M3uXTw=="],
 
+    "@rika/client-v2/generalist": ["generalist@0.65.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/client-s3": "3.1124.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@rivet-dev/agentos": "0.2.19", "@smithy/fetch-http-handler": "5.7.2", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "modal": "0.10.0", "rivetkit": "2.3.15", "vitest": "4.1.11", "yjs": "13.6.32" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/client-s3", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/vitest", "@modelcontextprotocol/sdk", "@rivet-dev/agentos", "@smithy/fetch-http-handler", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "modal", "rivetkit", "vitest", "yjs"] }, "sha512-c08Dm9pr8r9JSxJpKf5XsrVL10amTbZ9kb2FYeS706XO8fcosq+JjeNC5CyS2abz381ua6BbyuchYv1/M3uXTw=="],
+
     "@rika/context-v2/generalist": ["generalist@0.65.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/client-s3": "3.1124.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@rivet-dev/agentos": "0.2.19", "@smithy/fetch-http-handler": "5.7.2", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "modal": "0.10.0", "rivetkit": "2.3.15", "vitest": "4.1.11", "yjs": "13.6.32" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/client-s3", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/vitest", "@modelcontextprotocol/sdk", "@rivet-dev/agentos", "@smithy/fetch-http-handler", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "modal", "rivetkit", "vitest", "yjs"] }, "sha512-c08Dm9pr8r9JSxJpKf5XsrVL10amTbZ9kb2FYeS706XO8fcosq+JjeNC5CyS2abz381ua6BbyuchYv1/M3uXTw=="],
 
     "@rika/execution-v2/generalist": ["generalist@0.65.0", "", { "peerDependencies": { "@a2a-js/sdk": "1.0.1", "@ag-ui/core": "0.0.57", "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/client-s3": "3.1124.0", "@aws-sdk/credential-provider-node": "3.859.0", "@effect/ai-anthropic": "4.0.0-rc.112", "@effect/ai-openai": "4.0.0-rc.112", "@effect/ai-openai-compat": "4.0.0-rc.112", "@effect/ai-openrouter": "4.0.0-rc.112", "@effect/vitest": "4.0.0-rc.112", "@modelcontextprotocol/sdk": "1.29.0", "@rivet-dev/agentos": "0.2.19", "@smithy/fetch-http-handler": "5.7.2", "@smithy/types": "4.3.1", "@standard-schema/spec": "1.1.0", "effect": "4.0.0-rc.112", "es-module-lexer": "2.3.2", "foldkit": "0.148.2", "modal": "0.10.0", "rivetkit": "2.3.15", "vitest": "4.1.11", "yjs": "13.6.32" }, "optionalPeers": ["@a2a-js/sdk", "@ag-ui/core", "@aws-sdk/client-bedrock-runtime", "@aws-sdk/client-s3", "@aws-sdk/credential-provider-node", "@effect/ai-anthropic", "@effect/ai-openai", "@effect/ai-openai-compat", "@effect/ai-openrouter", "@effect/vitest", "@modelcontextprotocol/sdk", "@rivet-dev/agentos", "@smithy/fetch-http-handler", "@smithy/types", "@standard-schema/spec", "es-module-lexer", "foldkit", "modal", "rivetkit", "vitest", "yjs"] }, "sha512-c08Dm9pr8r9JSxJpKf5XsrVL10amTbZ9kb2FYeS706XO8fcosq+JjeNC5CyS2abz381ua6BbyuchYv1/M3uXTw=="],
@@ -2797,8 +2817,6 @@
     "to-buffer/isarray": ["isarray@2.0.5", "", {}, "sha512-xHjhDr3cNBK0BzdUJSPXZntQUx/mwMS5Rw4A7lPJ90XGAO6ISP/ePDNuo0vhqOZU+UD5JoodwCAAoZQd3FeAKw=="],
 
     "to-buffer/safe-buffer": ["safe-buffer@5.2.1", "", {}, "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ=="],
-
-    "tunnel-agent/safe-buffer": ["safe-buffer@5.2.1", "", {}, "sha512-rp3So07KcdmmKbGvgaNxQSJr7bGVSVk5S9Eq1F+ppbRo70+YeaDxkw5Dd8NPN+GD6bjnYm2VuPuCXmpuYvmCXQ=="],
 
     "type-is/content-type": ["content-type@2.1.0", "", {}, "sha512-mj7UPXE0jaqaOsukNZRUEfEi2AcL7C/vwmwcHV0O97eO1E1pxBZuyjlZrx5seTaNBg1U6+o35wpa35Qfcc+7ag=="],
 

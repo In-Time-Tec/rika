@@ -43,6 +43,7 @@ export function createPalette(options: PaletteOptions) {
       { id: "changed-files", label: "Toggle changed files", detail: "Alt+S", run: () => toggleSidebar("changed") },
       { id: "shortcuts", label: "Show shortcuts", detail: "?", run: () => setOverlay("shortcuts") },
       { id: "cancel", label: "Cancel current run", detail: "Ctrl+C", run: () => client.cancel() },
+      { id: "stop", label: "Stop current Session", detail: "", run: () => client.stop() },
       { id: "quit", label: "Quit", detail: "Ctrl+C", run: () => setOverlay("exit") },
     ]
     if (selectedThread()?.approval != null) {

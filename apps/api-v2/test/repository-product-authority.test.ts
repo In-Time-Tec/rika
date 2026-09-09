@@ -1,6 +1,12 @@
 /* oxlint-disable effecttsgo/async-function -- this live fixture drives the foreign Bun and Fetch boundaries. */
 /* oxlint-disable anti-slop/no-unknown-parameters -- Better Auth responses are decoded at the assertions below. */
+/* oxlint-disable effecttsgo/global-date-in-effect -- this live fixture persists the real token expiry for the client adapter. */
+/* oxlint-disable effecttsgo/node-builtin-import -- this live fixture owns an isolated temporary filesystem boundary. */
+/* oxlint-disable effecttsgo/prefer-path -- this live fixture assembles isolated temporary paths at the outer boundary. */
+/* oxlint-disable effecttsgo/prefer-schema-over-json -- compact credential fixture files are serialized at the foreign filesystem boundary. */
+/* oxlint-disable max-lines -- this live fixture covers the complete repository identity and API transport flow. */
 import { Clock, Config, Context, Effect, Exit, Layer, Random, Redacted, Schema } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { it } from "@effect/vitest"
 import { expect } from "vitest"
 import { TestClock } from "effect/testing"
@@ -11,7 +17,14 @@ import { eq } from "drizzle-orm"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
+// ast-grep-ignore: effect-prefer-filesystem -- this live fixture owns an isolated temporary filesystem boundary.
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+// ast-grep-ignore: effect-prefer-path -- this live fixture assembles isolated temporary paths at the outer boundary.
+import { join } from "node:path"
+import { makeFileCredentialAuth } from "@rika/client-v2/credentials"
 import type { IdentityRuntime } from "@rika/identity"
+import type { RuntimeWebSocket } from "../src/hosted/runtime-gateway"
 import {
   identityMigrations,
   identityRuntimeLayer,
@@ -23,6 +36,7 @@ import {
 import type { HostedClientAuthorityService } from "@rika/product/hosted-client-authority"
 import type { ProductRepositoryService } from "@rika/product-store/product-repository"
 import { makeRepositoryProductAuthority } from "../src/hosted/product-authority"
+import { handleApiV2Request } from "../src/hosted/http"
 import { decodeWorkspaceBinding, threadPartition } from "../src/hosted/partition"
 import { originalRequestForAuthentication } from "../src/hosted/server"
 import {
@@ -46,7 +60,7 @@ const PublicJwk = Schema.Struct({
 })
 const Registration = Schema.Struct({ client_id: Schema.String })
 const Authorization = Schema.Struct({ device_code: Schema.String, user_code: Schema.String })
-const Tokens = Schema.Struct({ access_token: Schema.String })
+const Tokens = Schema.Struct({ access_token: Schema.String, refresh_token: Schema.String, expires_in: Schema.Int, token_type: Schema.String })
 const decodeJson = <S extends Schema.Top>(schema: S, response: Response) =>
   Effect.tryPromise(() => response.json()).pipe(Effect.flatMap(Schema.decodeUnknownEffect(schema)))
 
@@ -351,6 +365,86 @@ it.effect.skipIf(databaseUrl === "")("authenticates API-v2 through repository-ba
           environment: "test",
           binding: () => Effect.succeed(binding),
         })
+        const clientHome = yield* Effect.tryPromise(() => mkdtemp(join(tmpdir(), "rika-api-v2-client-")))
+        const clientConfig = join(clientHome, ".config", "rika")
+        yield* Effect.tryPromise(() => mkdir(clientConfig, { recursive: true, mode: 0o700 }))
+        const privateJwk = yield* Effect.tryPromise(() => crypto.subtle.exportKey("jwk", key.privateKey))
+        yield* Effect.tryPromise(() =>
+          writeFile(
+            join(clientConfig, "hosted.json"),
+            JSON.stringify({ formatVersion: 3, origin: baseUrl, deviceId, clientId: registration.client_id }),
+            { mode: 0o600 },
+          ),
+        )
+        const accessTokenExpiresAt = (yield* TestClock.withLive(Clock.currentTimeMillis)) + tokens.expires_in * 1_000
+        yield* Effect.tryPromise(() =>
+          writeFile(
+            join(clientConfig, "hosted-credential.json"),
+            JSON.stringify({
+              formatVersion: 2,
+              origin: baseUrl,
+              deviceId,
+                refreshToken: tokens.refresh_token,
+                privateJwk,
+                accessToken: tokens.access_token,
+                accessTokenExpiresAt,
+            }),
+            { mode: 0o600 },
+          ),
+        )
+        yield* Effect.tryPromise(() => chmod(clientConfig, 0o700))
+        const clientServices = yield* Layer.build(BunServices.layer)
+        const clientAuth = yield* TestClock.withLive(
+          makeFileCredentialAuth({
+            origin: baseUrl,
+            home: clientHome,
+            fetch: globalThis.fetch,
+          }).pipe(Effect.provide(clientServices)),
+        )
+        const clientContextHeaders = yield* clientAuth.requestHeaders!({ method: "GET", url: contextUrl })
+        expect((yield* runtime.identify(new Request(contextUrl, { headers: clientContextHeaders })))?.userId).toBe(principal?.userId)
+        const clientWebSocketHeaders = yield* clientAuth.webSocketHeaders!({
+          method: "GET",
+          url: `wss://${new URL(baseUrl).host}/api/v2/threads/thread/runtime/sessions/${encodeURIComponent(binding.partition.rootSessionId)}/ws?cursor=1`,
+        })
+        const webSocketRequestUrl = `https://${new URL(baseUrl).host}/api/v2/threads/thread/runtime/sessions/${encodeURIComponent(binding.partition.rootSessionId)}/ws?cursor=1`
+        let forwardedWebSocket: RuntimeWebSocket | undefined
+        const webSocket: RuntimeWebSocket = { close: () => undefined, send: () => undefined }
+        const webSocketResponse = yield* handleApiV2Request({
+          authority,
+          gateway: {
+            ensureRootSession: () => Effect.succeed({ sessionId: binding.partition.rootSessionId, created: false }),
+            handle: (_partition, forwarded, socket) => {
+              forwardedWebSocket = socket
+              expect(forwarded.headers.get("x-rika-downstream-credential")).toMatch(/^rika-ds-/)
+              return Effect.succeed(new Response("upstream"))
+            },
+          },
+          environment: "test",
+          request: new Request(webSocketRequestUrl, {
+            method: "GET",
+            headers: { ...clientWebSocketHeaders, upgrade: "websocket", connection: "Upgrade" },
+          }),
+          websocket: webSocket,
+        })
+        expect(webSocketResponse.status).toBe(200)
+        expect(forwardedWebSocket).toBe(webSocket)
+        const sessionUrl = `${baseUrl}/api/v2/threads/thread/session`
+        const sessionHeaders = yield* clientAuth.requestHeaders!({ method: "POST", url: sessionUrl })
+        const sessionResponse = yield* handleApiV2Request({
+          authority,
+          gateway: {
+            ensureRootSession: () => Effect.succeed({ sessionId: binding.partition.rootSessionId, created: true }),
+            handle: () => Effect.succeed(new Response("upstream")),
+          },
+          environment: "test",
+          request: new Request(sessionUrl, {
+            method: "POST",
+            headers: { ...sessionHeaders, "x-command-id": "client-v2-live-session" },
+          }),
+        })
+        expect(sessionResponse.status).toBe(201)
+        yield* Effect.tryPromise(() => rm(clientHome, { recursive: true, force: true }))
         const authenticated = yield* authority.authenticateBearer("ignored", {
           ownerId: "owner",
           threadId: "thread",

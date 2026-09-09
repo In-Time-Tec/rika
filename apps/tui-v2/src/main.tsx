@@ -3,6 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { Console, Effect, Layer, Stdio } from "effect"
 import { CliError, Command, Flag } from "effect/unstable/cli"
 import { scenarios } from "./client/model"
+import type { LaunchOptions } from "./launch"
 import manifest from "../package.json"
 
 const command = Command.make(
@@ -16,6 +17,8 @@ const command = Command.make(
       Flag.withDefault(true),
       Flag.withDescription("Animate activity indicators; use --no-animate for stable frames"),
     ),
+    apiUrl: Flag.string("api-url").pipe(Flag.withDefault(""), Flag.withDescription("Hosted Rika API base URL")),
+    thread: Flag.string("thread").pipe(Flag.withDefault(""), Flag.withDescription("Hosted Thread id to select")),
   },
   Effect.fn("TuiV2.command")(function* (options) {
     const stdio = yield* Stdio.Stdio
@@ -26,7 +29,18 @@ const command = Command.make(
       })
     }
     const { launch } = yield* Effect.tryPromise(() => import("./launch"))
-    yield* Effect.scoped(launch(options))
+    if (options.apiUrl.length === 0 && options.thread.length > 0)
+      return yield* CliError.UserError.make({
+        cause: "Hosted Thread selection requires an API URL",
+        userMessage: "Pass --api-url when selecting a hosted Thread.",
+      })
+    const launchOptions: LaunchOptions = { scenario: options.scenario, animate: options.animate }
+    if (options.apiUrl.length > 0) {
+      const hosted: NonNullable<LaunchOptions["hosted"]> = { apiUrl: options.apiUrl }
+      if (options.thread.length > 0) Object.assign(hosted, { threadId: options.thread })
+      Object.assign(launchOptions, { hosted })
+    }
+    yield* Effect.scoped(launch(launchOptions))
   }),
 ).pipe(
   Command.withDescription("Rika TUI v2 — standalone offline interface; no server, credentials or workspace execution"),

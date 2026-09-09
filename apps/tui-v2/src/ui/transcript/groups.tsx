@@ -249,11 +249,11 @@ const ItemView = (props: ItemViewProps) => {
         </Match>
         <Match when={item().kind === "assistant"}>
           <Show when={item().text.trimEnd().length > 0}>
-            <MarkdownBody source={() => item().text.trimEnd()} />
+            <MarkdownBody source={source} />
           </Show>
         </Match>
         <Match when={item().kind === "reasoning"}>
-          <PlainBody source={() => item().text.trimEnd()} fg={colors.text} attributes={2 | 4} />
+          <MarkdownBody source={source} />
         </Match>
         <Match when={item().kind === "diff"}>
           <DiffHeader

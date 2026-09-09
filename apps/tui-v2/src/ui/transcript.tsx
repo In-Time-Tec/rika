@@ -1,7 +1,7 @@
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { CliRenderEvents, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { Effect, Schedule } from "effect"
-import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, type Accessor, type JSX } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, type Accessor, type JSX } from "solid-js"
 import type { TranscriptItem } from "../client/model"
 import { TranscriptWidth } from "./styled"
 import type { TranscriptGroup } from "./transcript/presenter"
@@ -14,7 +14,7 @@ import {
   navigableIdsFor,
   scrollForKey,
 } from "./transcript/navigation"
-import { selectedGroupIndex, transcriptWindow, transcriptWindowSize } from "./transcript/window"
+import { selectedGroupIndex, transcriptAnchorId, transcriptWindow, transcriptWindowSize } from "./transcript/window"
 import { colors } from "./theme"
 import { AnimationViewport } from "./transcript/visibility"
 
@@ -52,9 +52,26 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
   const animate = createMemo(() => props.animate !== false)
   const focused = createMemo(() => props.focused === true)
   const groups = createTranscriptProjection(() => props.items)
-  const [windowStart, setWindowStart] = createSignal<number | undefined>()
+  const [windowAnchor, setWindowAnchor] = createSignal<string | undefined>()
+  const windowStart = createMemo(() => {
+    const anchor = windowAnchor()
+    if (anchor === undefined) return undefined
+    const index = selectedGroupIndex({ groups: groups(), id: anchor })
+    return index < 0 ? undefined : index
+  })
+  const setWindowStart = (start: number | undefined) => {
+    const group = start === undefined ? undefined : groups()[start]
+    setWindowAnchor(group === undefined ? undefined : transcriptAnchorId(group))
+  }
   const window = createMemo(() => transcriptWindow({ count: groups().length, start: windowStart() }))
-  const visibleGroups = createMemo(() => groups().slice(window().start, window().end))
+  const visibleGroups = createMemo(
+    () =>
+      new Map(
+        groups()
+          .slice(window().start, window().end)
+          .map((group) => [group.id, group]),
+      ),
+  )
   let pendingScroll: "top" | "bottom" | { readonly selectedId: string } | undefined
   const applyWindowScroll = () => {
     if (scroll === undefined) return
@@ -75,12 +92,12 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
   renderer.on(CliRenderEvents.FRAME, applyWindowScroll)
   onCleanup(() => renderer.off(CliRenderEvents.FRAME, applyWindowScroll))
   const showWindow = (start: number | undefined, target: typeof pendingScroll) => {
+    const previous = window()
     pendingScroll = target
     setWindowStart(start)
+    if (previous.start === window().start && previous.end === window().end) applyWindowScroll()
     renderer.requestRender()
   }
-  const firstItemId = createMemo(() => props.items[0]?.id)
-  createEffect(on(firstItemId, () => showWindow(undefined, "bottom"), { defer: true }))
   const showEarlier = () => showWindow(Math.max(0, window().start - transcriptWindowSize), "bottom")
   const showNewer = () => {
     const start = window().end
@@ -156,9 +173,13 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
   useKeyboard((event: KeyEvent) => {
     if (!focused() || scroll === undefined || event.eventType === "release" || event.defaultPrevented) return
     const key = event.name.toLowerCase().replace(/[ _-]/g, "")
-    if (["home", "pageup"].includes(key) && scroll.scrollTop <= 0 && window().earlier > 0) {
-      if (key === "home") showWindow(0, "top")
-      else showEarlier()
+    if (key === "home") {
+      showWindow(0, "top")
+      event.preventDefault()
+      return
+    }
+    if (["pageup", "up", "arrowup"].includes(key) && scroll.scrollTop <= 0 && window().earlier > 0) {
+      showEarlier()
       event.preventDefault()
       return
     }
@@ -167,7 +188,11 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
       event.preventDefault()
       return
     }
-    if (key === "pagedown" && scroll.scrollTop + scroll.viewport.height >= scroll.scrollHeight && window().newer > 0) {
+    if (
+      ["pagedown", "down", "arrowdown"].includes(key) &&
+      scroll.scrollTop + scroll.viewport.height >= scroll.scrollHeight &&
+      window().newer > 0
+    ) {
       showNewer()
       event.preventDefault()
       return
@@ -215,12 +240,12 @@ export const Transcript = (props: TranscriptProps): JSX.Element => {
               {`Show earlier messages (${window().earlier} groups)`}
             </text>
           </Show>
-          <For each={visibleGroups()}>
-            {(group) => (
-              <box id={`transcript-group:${group.id}`} width="100%" flexDirection="column" flexShrink={0}>
+          <For each={[...visibleGroups().keys()]}>
+            {(id) => (
+              <box id={`transcript-group:${id}`} width="100%" flexDirection="column" flexShrink={0}>
                 <GroupView
-                  group={group}
-                  active={props.active && isLastItem(group, lastItemId())}
+                  group={visibleGroups().get(id)!}
+                  active={props.active && isLastItem(visibleGroups().get(id)!, lastItemId())}
                   animate={animate}
                   frame={frame}
                   isExpanded={isExpanded}

@@ -44,7 +44,7 @@ export interface ClientState {
   readonly selectedThreadId: string
   readonly threads: readonly ThreadView[]
   readonly mode: Mode
-  readonly connection: "offline" | "reconnecting"
+  readonly connection: "offline" | "connecting" | "connected" | "reconnecting" | "disconnected"
   readonly notice: string
 }
 export interface Client {
@@ -55,6 +55,8 @@ export interface Client {
   readonly archiveThread: () => void
   readonly submit: (prompt: string, images?: readonly ImageAttachment[]) => void
   readonly cancel: () => void
+  readonly stop: () => void
+  readonly followUp: (prompt: string, childSessionId?: string) => void
   readonly approve: (approved: boolean) => void
   readonly editPending: (id: string, prompt: string) => void
   readonly removePending: (id: string) => void
