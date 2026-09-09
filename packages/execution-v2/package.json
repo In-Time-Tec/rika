@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/execution-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./binding": "./src/binding.ts",
+    "./component": "./src/component.ts",
+    "./executor": "./src/executor.ts",
+    "./operation": "./src/operation.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112",
+    "generalist": "0.65.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/execution-v2/src packages/execution-v2/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}
