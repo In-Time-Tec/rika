@@ -225,7 +225,7 @@
       }
     },
     {
-      "files": ["apps/tui-v2/**"],
+      "files": ["apps/tui-v2/**", "packages/runner-v2/**"],
       "rules": {
         "effecttsgo/duplicate-package": "off"
       }
