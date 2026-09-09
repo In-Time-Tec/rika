@@ -155,6 +155,7 @@ export type EffectiveAuthorization = typeof EffectiveAuthorization.Type
 export const ChildAttenuation = Schema.Struct({
   allowedTools: Schema.Array(identifier),
   allowedModels: Schema.Array(Schema.String),
+  allowedCredentials: Schema.Array(SecureCredentialReference),
 })
 export type ChildAttenuation = typeof ChildAttenuation.Type
 

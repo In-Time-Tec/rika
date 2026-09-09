@@ -191,6 +191,7 @@
         "generalist": "0.65.0",
       },
       "devDependencies": {
+        "@effect/platform-bun": "4.0.0-rc.112",
         "@effect/vitest": "4.0.0-rc.112",
         "@types/bun": "1.4.0",
         "typescript": "7.0.2",

@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- context materialization keeps the canonical validation and composition boundary together. */
 /* oxlint-disable anti-slop/no-unknown-parameters -- unknown values are parsed by the boundary schema before capture. */
 /* oxlint-disable anti-slop/no-runtime-typeof -- defensive error and JSON traversal checks protect fail-closed paths. */
 /* oxlint-disable anti-slop/no-conditional-empty-object-spread -- optional Generalist metadata remains absent when unset. */
@@ -8,7 +9,11 @@
 /* oxlint-disable effecttsgo/schema-number -- model settings preserve provider-defined numeric configuration. */
 /* oxlint-disable effecttsgo/unnecessary-fail-yieldable-error -- explicit failures keep error reasons at this boundary. */
 import { Context, Effect, Layer, Schema } from "effect"
-import { Instructions, Pins, SkillCatalog } from "generalist"
+import { Tool, Toolkit } from "effect/unstable/ai"
+import { Agent, Instructions, ModelRegistry, Pins, SkillCatalog, ToolContext } from "generalist"
+import type { Instructions as InstructionsService } from "generalist/instructions"
+import * as Components from "generalist/components"
+import { ChildAdmission, Errors, RunStore } from "generalist/runtime"
 import {
   ActivatedSkill,
   Authorization,
@@ -78,6 +83,33 @@ export interface ContextMaterializerService {
     materialization: SessionMaterialization,
     requested: ChildAttenuation,
   ) => Effect.Effect<ChildAttenuation, ContextMaterializationError>
+  readonly authorizeChild: (
+    materialization: SessionMaterialization,
+    authorization: Authorization,
+    requested: ChildAttenuation,
+  ) => Effect.Effect<ChildAttenuation, ContextMaterializationError>
+}
+
+export interface SessionContextComposition {
+  readonly agent: Agent.Any
+  readonly instructions: Layer.Layer<InstructionsService>
+  readonly model: ModelConfiguration
+  readonly modelPin: string
+}
+
+export type SessionModelLayerFactory = (model: ModelConfiguration) => Layer.Layer<ModelRegistry.ModelRegistry>
+
+export interface SessionAuthorizationService {
+  readonly current: (sessionId: string) => Effect.Effect<Authorization, ContextMaterializationError>
+}
+
+export class SessionAuthorization extends Context.Service<SessionAuthorization, SessionAuthorizationService>()(
+  "@rika/context-v2/materializer/SessionAuthorization",
+) {}
+
+export interface GuardedAgentChildrenOptions {
+  readonly declaration: Components.Declaration<SessionMaterialization, SessionMaterializationCommand>
+  readonly children: Readonly<Record<string, ChildAttenuation>>
 }
 
 export class ContextMaterializationError extends Schema.TaggedError<ContextMaterializationError>()(
@@ -133,12 +165,14 @@ const containsCredentialValue = (value: unknown, key?: string): boolean => {
 
 const validateModel = (model: ModelConfiguration): Effect.Effect<ModelConfiguration, ContextMaterializationError> =>
   Effect.try({
-    try: () => {
-      if (containsCredentialValue(model.settings.options)) throw new Error("Model settings contain a credential value")
-      return Schema.decodeUnknownSync(ModelConfiguration)(model)
-    },
+    try: () => validateModelSync(model),
     catch: () => failure("settings", "Model configuration must contain secure credential references only"),
   })
+
+const validateModelSync = (model: ModelConfiguration): ModelConfiguration => {
+  if (containsCredentialValue(model.settings.options)) throw new Error("Model settings contain a credential value")
+  return Schema.decodeUnknownSync(ModelConfiguration)(model)
+}
 
 const truncate = (value: string, max: number) => (value.length <= max ? value : `${value.slice(0, Math.max(0, max - 1))}…`)
 const boundedValues = (values: ReadonlyArray<string>) => values.slice(0, 64).map((value) => truncate(value, 512))
@@ -291,7 +325,7 @@ const activateWithReader = (reader: WorkspaceReaderService, input: ActivateSkill
     })
   }).pipe(Effect.mapError((error) => asError(error, "skill-body")))
 
-const restoreWithReader = (materialization: SessionMaterialization) =>
+const pinnedGuidance = (materialization: SessionMaterialization) =>
   Effect.gen(function* () {
     const decoded = yield* Instructions.Snapshot.decode(materialization.registration.id, materialization.registration.payload).pipe(
       Effect.mapError(() => failure("content-missing", "Pinned guidance content cannot be reconstructed")),
@@ -300,7 +334,8 @@ const restoreWithReader = (materialization: SessionMaterialization) =>
     if (
       decoded.scope !== materialization.guidanceScope ||
       materialization.guidance.id !== materialization.registration.id ||
-      expectedSnapshot.id !== materialization.guidance.id
+      expectedSnapshot.id !== materialization.guidance.id ||
+      Pins.digest(materialization.guidance.payload) !== Pins.digest(materialization.registration.payload)
     )
       return yield* Effect.fail(failure("content-missing", "Pinned guidance registration does not match the Session"))
     const pinnedRegistration = Instructions.Registration.make(decoded, "rika/context-v2")
@@ -316,6 +351,12 @@ const restoreWithReader = (materialization: SessionMaterialization) =>
       if (entry === undefined || skillBodyIdentity(entry.content).digest !== activated.bodyIdentity.digest)
         return yield* Effect.fail(failure("content-missing", "Pinned activated skill content cannot be reconstructed"))
     }
+    return decoded
+  })
+
+const restoreWithReader = (materialization: SessionMaterialization) =>
+  Effect.gen(function* () {
+    yield* pinnedGuidance(materialization)
     if (modelPin(materialization.model) !== materialization.modelPin)
       return yield* Effect.fail(failure("settings", "Pinned model configuration does not match the Session"))
     return materialization
@@ -357,7 +398,124 @@ const attenuateChild = (materialization: SessionMaterialization, requested: Chil
       return yield* Effect.fail(failure("attenuation", "Child tools must be a subset of parent tools"))
     if (requested.allowedModels.some((pin) => !parentModels.has(pin)))
       return yield* Effect.fail(failure("attenuation", "Child models must be a subset of parent models"))
+    if (requested.allowedCredentials.some((credential) => !materialization.model.credentialRefs.some((parent) => sameCredential(parent, credential))))
+      return yield* Effect.fail(failure("attenuation", "Child credentials must be a subset of parent credentials"))
     return requested
+  })
+
+const sameCredential = (left: { readonly provider: string; readonly reference: string }, right: { readonly provider: string; readonly reference: string }) =>
+  left.provider === right.provider && left.reference === right.reference
+
+const authorizeChildWithAuthorization = (
+  materialization: SessionMaterialization,
+  authorization: Authorization,
+  requested: ChildAttenuation,
+) =>
+  Effect.gen(function* () {
+    const current = yield* effectiveAuthorization(materialization, authorization)
+    if (!current.canResume)
+      return yield* Effect.fail(failure("revoked", "Child execution requires the current model and credentials to remain authorized"))
+    const narrowed = yield* attenuateChild(materialization, requested)
+    if (materialization.model.credentialRefs.some((required) => !requested.allowedCredentials.some((allowed) => sameCredential(allowed, required))))
+      return yield* Effect.fail(failure("attenuation", "Child credentials must include every credential required by the selected model"))
+    if (requested.allowedTools.some((name) => !current.allowedTools.includes(name)))
+      return yield* Effect.fail(failure("revoked", "Child tools must remain granted by the current authorization"))
+    if (requested.allowedModels.some((pin) => !current.allowedModels.includes(pin)))
+      return yield* Effect.fail(failure("revoked", "Child models must remain granted by the current authorization"))
+    if (requested.allowedCredentials.some((credential) => !current.allowedCredentials.some((allowed) => sameCredential(allowed, credential))))
+      return yield* Effect.fail(failure("revoked", "Child credentials must remain granted by the current authorization"))
+    return narrowed
+  })
+
+const runtimeUnavailable = (error: unknown) =>
+  Errors.RuntimeUnavailable.make({ message: error instanceof Error ? error.message : String(error) })
+
+export const guardedAgentChildrenLayer = (
+  options: GuardedAgentChildrenOptions,
+): Layer.Layer<ChildAdmission.AgentChildren, never, RunStore.RunStore | SessionAuthorization> =>
+  Layer.effect(
+    ChildAdmission.AgentChildren,
+    Effect.gen(function* () {
+      const store = yield* RunStore.RunStore
+      const authorization = yield* SessionAuthorization
+      const base = ChildAdmission.makeAgentChildren(store)
+      return ChildAdmission.AgentChildren.of({
+        admit: (input) =>
+          Effect.gen(function* () {
+            const context = yield* ToolContext.ToolContext
+            const parentRunId = context.runId
+            if (parentRunId === undefined)
+              return yield* ChildAdmission.ChildParentageInvalid.make({ parentRunId: "unknown", childRunId: "unknown" })
+            const requested = options.children[input.selection]
+            if (requested === undefined)
+              return yield* runtimeUnavailable(`No context grant is registered for child '${input.selection}'`)
+            const materialization = yield* Components.read(options.declaration).pipe(Effect.mapError(runtimeUnavailable))
+            const current = yield* authorization.current(context.sessionId).pipe(Effect.mapError(runtimeUnavailable))
+            yield* authorizeChildWithAuthorization(materialization, current, requested).pipe(Effect.mapError(runtimeUnavailable))
+            return yield* base.admit(input)
+          }),
+        listDirect: base.listDirect,
+        inspect: base.inspect,
+        join: base.join,
+        cancel: base.cancel,
+      })
+    }),
+  )
+
+const guidanceText = (state: Instructions.State.GuidanceState) =>
+  Instructions.State.allEntries(state)
+    .toSorted((left, right) => left.id.localeCompare(right.id))
+    .map((entry) => `${entry.path ?? entry.title}\n${entry.content}`)
+    .join("\n\n")
+
+export const composeSessionContext = (agent: Agent.Any, materialization: SessionMaterialization) =>
+  Effect.gen(function* () {
+    const guidance = yield* pinnedGuidance(materialization)
+    const model = yield* validateModel(materialization.model)
+    if (modelPin(model) !== materialization.modelPin)
+      return yield* Effect.fail(failure("settings", "Pinned model configuration does not match the Session"))
+    const contextInstructions = guidanceText(guidance)
+    const provider = Instructions.fromText(contextInstructions)(`rika/context-v2/${materialization.guidance.id}`)
+    const composed: Agent.Any = {
+      ...agent,
+      instructions: agent.instructions === undefined ? contextInstructions : `${agent.instructions}\n\n${contextInstructions}`,
+      model: model.selection,
+    }
+    return {
+      agent: composed,
+      instructions: Instructions.layer([provider]),
+      model,
+      modelPin: materialization.modelPin,
+    } satisfies SessionContextComposition
+  })
+
+export const composeChildSessionContext = (
+  agent: Agent.Any,
+  materialization: SessionMaterialization,
+  authorization: Authorization,
+  requested: ChildAttenuation,
+): Effect.Effect<SessionContextComposition, ContextMaterializationError> =>
+  Effect.gen(function* () {
+    yield* authorizeChildWithAuthorization(materialization, authorization, requested)
+    if (!requested.allowedModels.includes(materialization.modelPin))
+      return yield* Effect.fail(failure("attenuation", "Child model attenuation must retain the selected model"))
+    const composition = yield* composeSessionContext(agent, materialization)
+    const allowedTools = new Set(requested.allowedTools)
+    const tools = Object.values(composition.agent.toolkit.tools).filter(
+      (tool): tool is Tool.Any => typeof tool.name === "string" && allowedTools.has(tool.name),
+    )
+    return {
+      ...composition,
+      agent: { ...composition.agent, toolkit: Toolkit.make(...tools) },
+    } satisfies SessionContextComposition
+  })
+
+export const modelLayer = (materialization: SessionMaterialization, factory: SessionModelLayerFactory) =>
+  Effect.gen(function* () {
+    const model = yield* validateModel(materialization.model)
+    if (modelPin(model) !== materialization.modelPin)
+      return yield* Effect.fail(failure("settings", "Pinned model configuration does not match the Session"))
+    return factory(model)
   })
 
 const componentTransition = (state: SessionMaterialization, command: SessionMaterializationCommand): SessionMaterialization => {
@@ -390,6 +548,7 @@ const componentTransition = (state: SessionMaterialization, command: SessionMate
     }
   }
   if (command.expectedRevision !== state.settingsRevision) throw new Error("Settings revision conflict")
+  validateModelSync(command.model)
   if (modelPin(command.model) !== command.modelPin) throw new Error("Model configuration identity mismatch")
   return { ...state, model: command.model, modelPin: command.modelPin, settingsRevision: state.settingsRevision + 1 }
 }
@@ -412,6 +571,7 @@ export const makeContextMaterializer = (reader: WorkspaceReaderService): Context
   restore: restoreWithReader,
   effectiveAuthorization,
   attenuateChild,
+  authorizeChild: authorizeChildWithAuthorization,
 })
 
 export class ContextMaterializer extends Context.Service<ContextMaterializer, ContextMaterializerService>()(
@@ -460,6 +620,16 @@ export const attenuate = (materialization: SessionMaterialization, requested: Ch
   Effect.gen(function* () {
     const materializer = yield* ContextMaterializer
     return yield* materializer.attenuateChild(materialization, requested)
+  })
+
+export const authorizeChild = (
+  materialization: SessionMaterialization,
+  authorization: Authorization,
+  requested: ChildAttenuation,
+) =>
+  Effect.gen(function* () {
+    const materializer = yield* ContextMaterializer
+    return yield* materializer.authorizeChild(materialization, authorization, requested)
   })
 
 export type { ContentIdentity }
