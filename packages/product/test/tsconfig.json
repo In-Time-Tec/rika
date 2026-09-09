@@ -1,8 +1,7 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "plugins": [
       {
         "name": "@effect/language-service",
@@ -10,5 +9,5 @@
       }
     ]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vite.config.ts"]
+  "include": ["**/*.ts"]
 }

@@ -108,7 +108,7 @@
     "effecttsgo/crypto-random-uuid": "error",
     "effecttsgo/crypto-random-uuid-in-effect": "error",
     "effecttsgo/deterministic-keys": "error",
-    "effecttsgo/duplicate-package": "off",
+    "effecttsgo/duplicate-package": "error",
     "effecttsgo/effect-do-notation": "error",
     "effecttsgo/effect-fn-iife": "error",
     "effecttsgo/effect-fn-implicit-any": "error",
@@ -216,6 +216,12 @@
         "anti-slop-effect/no-service-constructor-imports": "off",
         "effecttsgo/missing-pipeable-signature": "off",
         "no-await-in-loop": "off"
+      }
+    },
+    {
+      "files": ["alchemy.run.ts", "vitest.config.ts"],
+      "rules": {
+        "effecttsgo/duplicate-package": "off"
       }
     }
   ],
