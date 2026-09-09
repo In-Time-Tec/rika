@@ -14,6 +14,7 @@
   "dependencies": {
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
+    "@rika/client-v2": "workspace:*",
     "@opentui/solid": "catalog:",
     "@rika/terminal": "workspace:*",
     "effect": "catalog:",

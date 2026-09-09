@@ -101,6 +101,8 @@ export function createWorkload(size: WorkloadSize) {
     archiveThread: unsupported,
     submit: unsupported,
     cancel: unsupported,
+    stop: unsupported,
+    followUp: unsupported,
     approve: unsupported,
     editPending: unsupported,
     removePending: unsupported,

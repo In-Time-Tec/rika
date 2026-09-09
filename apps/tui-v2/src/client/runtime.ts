@@ -484,6 +484,8 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     },
     submit,
     cancel: cancelSelected,
+    stop: cancelSelected,
+    followUp: (prompt) => submit(prompt),
     approve,
     editPending,
     removePending,

@@ -11,3 +11,4 @@ files:
 ignores:
   - "**/dist/**"
   - "node_modules/**"
+  - "apps/api-v2/src/hosted/rivet-actor.ts"

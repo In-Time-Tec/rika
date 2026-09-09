@@ -24,3 +24,24 @@ test("Ctrl+C opens a capturable exit banner after dismissing the Thread switcher
       }),
     ),
   ))
+
+test("hosted reconnect banner and keyboard stop/cancel controls render and dispatch", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(BunServices.layer)
+        yield* Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const child = yield* spawner.spawn(
+            ChildProcess.make("bun", ["--preload", "@opentui/solid/preload", "test/fixtures/hosted-controls.tsx"], {
+              cwd: fileURLToPath(new URL("..", import.meta.url)),
+              stdin: "ignore",
+              stdout: "ignore",
+              stderr: "inherit",
+            }),
+          )
+          expect(Number(yield* child.exitCode)).toBe(0)
+        }).pipe(Effect.provide(services))
+      }),
+    ),
+  ))
