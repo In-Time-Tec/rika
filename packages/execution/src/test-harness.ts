@@ -1,10 +1,10 @@
-import { Response as AiResponse, AiError, LanguageModel, type Prompt } from "effect/unstable/ai"
+import { Response as AiResponse, AiError, LanguageModel, Prompt } from "effect/unstable/ai"
 import { ModelRegistry } from "generalist"
 import { TestModel } from "generalist/testing"
 import type * as ExecutionRouteSnapshot from "@rika/product/execution-route-snapshot"
 import { testExecutionRoute } from "@rika/product/execution-route-snapshot"
 import { modelRegistrationIdentity } from "@rika/product/model-registration-identity"
-import { Context, Effect, Layer, Ref, Scope, Stream } from "effect"
+import { Context, Effect, Layer, Ref, Schema, Scope, Stream } from "effect"
 
 export type Profile =
   | "Root"
@@ -29,6 +29,11 @@ export interface Lane {
   readonly profile?: Profile
   readonly steps: ReadonlyArray<Step>
   readonly providerHttpEnvelope?: ProviderHttpEnvelope
+  readonly resolveToolCallParams?: (
+    name: string,
+    params: Schema.Json,
+    prompt: Prompt.Prompt,
+  ) => Effect.Effect<Schema.Json>
 }
 
 const profiles: ReadonlyArray<Profile> = [
@@ -269,6 +274,23 @@ export const makeLaneModels = Effect.fn("TestHarness.makeLaneModels")(function* 
       Effect.flatMap((context) => {
         const profile = profiles[index]!
         const service = Context.get(context, LanguageModel.LanguageModel)
+        const resolveToolCallParams = declared.get(profile)?.resolveToolCallParams
+        if (resolveToolCallParams !== undefined) {
+          const streamText = service.streamText
+          Object.assign(service, {
+            streamText: (options: Parameters<LanguageModel.Service["streamText"]>[0]) =>
+              streamText(options).pipe(
+                Stream.mapEffect((part) =>
+                  Effect.gen(function* () {
+                    if (part.type !== "tool-call") return part
+                    const input = yield* Schema.decodeUnknownEffect(Schema.Json)(part.params).pipe(Effect.orDie)
+                    const params = yield* resolveToolCallParams(part.name, input, Prompt.make(options.prompt))
+                    return { ...part, params }
+                  }),
+                ),
+              ),
+          })
+        }
         const envelope = declared.get(profile)?.providerHttpEnvelope
         return ModelRegistry.registration({
           provider: "test",

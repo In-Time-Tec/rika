@@ -19,22 +19,45 @@ test(
          * process already gone, and raising it alone pushed the finish past the final wait.
          */
         const command = "printf EARLY_OUTPUT; sleep 5; printf FINAL_OUTPUT"
+        let processId = ""
         const app = yield* TuiApp.tuiApp({
           inspectTranscript: true,
-          script: [
-            model.turn([model.tool("bash", { command, timeout_ms: 0 }, "bash-wait")]),
-            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate")]),
-            model.turn([model.tool("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final")]),
-            model.text("SHELL_WAIT_COMPLETE"),
+          lanes: [
+            {
+              resolveToolCallParams: (name, params, prompt) =>
+                Effect.gen(function* () {
+                  if (name !== "shell_command_status") return params
+                  const receipt = prompt.content
+                    .flatMap((message) =>
+                      message.role === "tool"
+                        ? message.content.flatMap((part) =>
+                            part.type === "tool-result" && part.id === "bash-wait" ? [part.result] : [],
+                          )
+                        : [],
+                    )
+                    .at(-1)
+                  const result = yield* Schema.decodeUnknownEffect(Schema.Struct({ processId: Schema.String }))(receipt)
+                  const status = yield* Schema.decodeUnknownEffect(Schema.Struct({ waitMillis: Schema.Finite }))(params)
+                  processId = result.processId
+                  return { ...status, processId }
+                }).pipe(Effect.orDie),
+              steps: [
+                model.turn([model.tool("bash", { command, timeout_ms: 0 }, "bash-wait")]),
+                model.turn([
+                  model.tool("shell_command_status", { processId: "launch-receipt", waitMillis: 0 }, "wait-immediate"),
+                ]),
+                model.turn([
+                  model.tool("shell_command_status", { processId: "launch-receipt", waitMillis: 10_000 }, "wait-final"),
+                ]),
+                model.text("SHELL_WAIT_COMPLETE"),
+              ],
+            },
           ],
         })
 
         yield* Effect.tryPromise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
-        const running = yield* app.waitFrameMatch(
-          (frame) => frame.includes(`⇢ $ ${command}`),
-          20_000,
-        )
+        const running = yield* app.waitFrameMatch((frame) => frame.includes(`⇢ $ ${command}`), 20_000)
         expect(running).not.toContain("detached")
 
         yield* app.clickText(command)
@@ -56,18 +79,19 @@ test(
         )
         expect(tools).toHaveLength(1)
         const bash = tools?.[0]
+        expect(processId).not.toBe("")
         expect(bash).toMatchObject({
           name: "bash",
           status: "complete",
           process: {
-            processId: "1",
+            processId,
             running: false,
             exitCode: 0,
             command,
             background: true,
             checks: [
-              { toolCallId: "wait-immediate", processId: "1", waitMillis: 0 },
-              { toolCallId: "wait-final", processId: "1", waitMillis: 10_000 },
+              { toolCallId: "wait-immediate", processId, waitMillis: 0 },
+              { toolCallId: "wait-final", processId, waitMillis: 10_000 },
             ],
           },
         })
