@@ -1,5 +1,7 @@
 /* oxlint-disable effecttsgo/strict-effect-provide -- launch is the application composition boundary. */
 /* oxlint-disable typescript/no-unsafe-type-assertion -- Bun's DOM-compatible WebSocket global omits its headers overload. */
+/* oxlint-disable complexity -- hosted composition validates credentials and wires owned transport services. */
+/* oxlint-disable effecttsgo/global-fetch -- the owning Bun process supplies the Fetch primitive to this launch boundary. */
 import { CliRenderEvents, createCliRenderer } from "@opentui/core"
 import type { CliRendererErrorEvent, CliRendererHandlerErrorEvent } from "@opentui/core"
 import { render } from "@opentui/solid"
@@ -11,6 +13,7 @@ import {
   makeGeneralistClient,
   type GeneralistTransportAuth,
 } from "@rika/client-v2/generalist"
+import { makeFileCredentialAuth } from "@rika/client-v2/credentials"
 import { makeFetchTransport, makeProductClient, type ProductRequestHeaders } from "@rika/client-v2/product"
 import { ThreadClientError } from "@rika/client-v2/thread"
 import { App } from "./app"
@@ -33,13 +36,11 @@ interface HostedProductOptions {
   readonly baseUrl: string
   readonly transport: ReturnType<typeof makeFetchTransport>
   requestHeaders?: ProductRequestHeaders
-  bearerToken?: string
 }
 
 interface HostedGeneralistOptions {
   readonly baseUrl: string
   auth?: GeneralistTransportAuth
-  bearerToken?: string
 }
 
 export interface LaunchOptions {
@@ -49,7 +50,6 @@ export interface LaunchOptions {
     readonly apiUrl: string
     /** Hosted credentials are resolved by the owning application, never parsed from argv by TUI v2. */
     readonly auth?: GeneralistTransportAuth
-    readonly accessToken?: string
     readonly threadId?: string
   }
 }
@@ -69,15 +69,21 @@ const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
     ? Effect.sync(() => createClient({ scenario: options.scenario }))
     : Effect.gen(function* () {
         const hosted = options.hosted!
-        if (hosted.auth?.requestHeaders === undefined && hosted.accessToken === undefined)
-          return yield* new TerminalFailure({ message: "Hosted credentials were not provided by the owning application" })
-        const fetch = yield* FetchHttpClient.Fetch
+        const fetch = globalThis.fetch
+        const auth =
+          hosted.auth ??
+          (yield* makeFileCredentialAuth({ origin: hosted.apiUrl, fetch }).pipe(
+            Effect.mapError((error) => new TerminalFailure({ message: error.message })),
+          ))
+        if (auth.requestHeaders === undefined)
+          return yield* new TerminalFailure({ message: "Hosted HTTP credentials were not provided by the owning application" })
+        if (auth.webSocketHeaders === undefined)
+          return yield* new TerminalFailure({ message: "Hosted WebSocket credentials were not provided by the owning application" })
         const productOptions: HostedProductOptions = {
           baseUrl: hosted.apiUrl,
           transport: makeFetchTransport((request) => fetch(request)),
         }
-        if (hosted.auth?.requestHeaders !== undefined) productOptions.requestHeaders = hosted.auth.requestHeaders
-        if (hosted.accessToken !== undefined) productOptions.bearerToken = hosted.accessToken
+        if (auth.requestHeaders !== undefined) productOptions.requestHeaders = auth.requestHeaders
         const product = makeProductClient(productOptions)
         const page = yield* product.listThreads().pipe(
           Effect.mapError((error) => new TerminalFailure({ message: error.message })),
@@ -89,8 +95,7 @@ const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
           new URL(`/api/v2/threads/${encodeURIComponent(id)}/runtime`, hosted.apiUrl).toString()
         const buildExecution = (id: string) => {
           const generalistOptions: HostedGeneralistOptions = { baseUrl: runtimeUrl(id) }
-          if (hosted.auth !== undefined) generalistOptions.auth = hosted.auth
-          if (hosted.accessToken !== undefined) generalistOptions.bearerToken = hosted.accessToken
+          generalistOptions.auth = auth
           return makeGeneralistClient(generalistOptions).pipe(
             Effect.provide(FetchHttpClient.layer),
             Effect.map(makeExecutionClient),
@@ -115,10 +120,9 @@ const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
             return new bunWebSocket(url, socketOptions)
           },
         }
-        if (hosted.auth?.webSocketHeaders !== undefined)
-          Object.assign(hostedOptions, { webSocketHeaders: hosted.auth.webSocketHeaders })
+        Object.assign(hostedOptions, { webSocketHeaders: auth.webSocketHeaders })
         return createHostedClient(hostedOptions)
-      }).pipe(Effect.provide(FetchHttpClient.layer))
+      })
   const client = yield* Effect.acquireRelease(
     makeHosted,
     (resource) => resource.dispose,

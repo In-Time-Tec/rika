@@ -20,7 +20,6 @@
         "allowedDuplicatedPackages": ["generalist"],
         "diagnostics": true,
         "includeSuggestionsInTsc": true,
-        "allowedDuplicatedPackages": ["generalist"],
         "ignoreEffectSuggestionsInTscExitCode": false,
         "ignoreEffectWarningsInTscExitCode": false,
         "ignoreEffectErrorsInTscExitCode": false,

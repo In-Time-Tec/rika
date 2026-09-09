@@ -18,7 +18,6 @@ const command = Command.make(
       Flag.withDescription("Animate activity indicators; use --no-animate for stable frames"),
     ),
     apiUrl: Flag.string("api-url").pipe(Flag.withDefault(""), Flag.withDescription("Hosted Rika API base URL")),
-    accessToken: Flag.string("access-token").pipe(Flag.withDefault(""), Flag.withDescription("Hosted Rika bearer token")),
     thread: Flag.string("thread").pipe(Flag.withDefault(""), Flag.withDescription("Hosted Thread id to select")),
   },
   Effect.fn("TuiV2.command")(function* (options) {
@@ -30,23 +29,17 @@ const command = Command.make(
       })
     }
     const { launch } = yield* Effect.tryPromise(() => import("./launch"))
-    let hosted: LaunchOptions["hosted"]
-    if (options.apiUrl.length === 0 && options.accessToken.length === 0) hosted = undefined
-    else if (options.apiUrl.length === 0 || options.accessToken.length === 0)
+    if (options.apiUrl.length === 0 && options.thread.length > 0)
       return yield* CliError.UserError.make({
-        cause: "Hosted API URL and access token must be provided together",
-        userMessage: "Pass both --api-url and --access-token for hosted mode.",
+        cause: "Hosted Thread selection requires an API URL",
+        userMessage: "Pass --api-url when selecting a hosted Thread.",
       })
-    else {
-      const value = {
-        apiUrl: options.apiUrl,
-        accessToken: options.accessToken,
-      }
-      if (options.thread.length > 0) Object.assign(value, { threadId: options.thread })
-      hosted = value
-    }
     const launchOptions: LaunchOptions = { scenario: options.scenario, animate: options.animate }
-    if (hosted !== undefined) Object.assign(launchOptions, { hosted })
+    if (options.apiUrl.length > 0) {
+      const hosted: NonNullable<LaunchOptions["hosted"]> = { apiUrl: options.apiUrl }
+      if (options.thread.length > 0) Object.assign(hosted, { threadId: options.thread })
+      Object.assign(launchOptions, { hosted })
+    }
     yield* Effect.scoped(launch(launchOptions))
   }),
 ).pipe(

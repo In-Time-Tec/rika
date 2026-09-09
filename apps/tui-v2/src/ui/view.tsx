@@ -66,7 +66,7 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.surface} overflow="hidden">
       <box flexGrow={1} minHeight={0} width="100%" flexDirection="row">
         <box flexGrow={1} minWidth={0} minHeight={0} flexDirection="column">
-          <Show when={props.client.state.connection === "reconnecting"}>
+          <Show when={props.client.state.connection !== "offline" && props.client.state.connection !== "connected"}>
             <text
               width="100%"
               height={1}
