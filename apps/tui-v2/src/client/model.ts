@@ -19,6 +19,7 @@ export interface TranscriptItem {
   readonly text: string
   readonly status?: Activity
   readonly language?: string
+  readonly childSessionId?: string
 }
 export interface ImageAttachment {
   readonly path: string
@@ -46,6 +47,7 @@ export interface ClientState {
   readonly mode: Mode
   readonly connection: "offline" | "connecting" | "connected" | "reconnecting" | "disconnected"
   readonly notice: string
+  readonly focusedSessionId?: string | undefined
 }
 export interface Client {
   readonly state: ClientState
@@ -57,6 +59,9 @@ export interface Client {
   readonly cancel: () => void
   readonly stop: () => void
   readonly followUp: (prompt: string, childSessionId?: string) => void
+  readonly loadOlder?: () => void
+  readonly openChildSession?: (sessionId: string) => void
+  readonly backToThread?: () => void
   readonly approve: (approved: boolean) => void
   readonly editPending: (id: string, prompt: string) => void
   readonly removePending: (id: string) => void

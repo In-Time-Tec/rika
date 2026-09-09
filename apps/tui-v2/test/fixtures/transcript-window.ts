@@ -17,6 +17,7 @@ const [items, setItems] = createSignal<readonly TranscriptItem[]>(
   })),
 )
 const [navigation, setNavigation] = createSignal<TranscriptNavigation>()
+let loadedOlderPages = 0
 const screen = await testRender(
   () =>
     createComponent(Transcript, {
@@ -27,6 +28,18 @@ const screen = await testRender(
       animate: false,
       focused: true,
       navigation,
+      loadOlder: () => {
+        loadedOlderPages += 1
+        setItems((previous) => [
+          {
+            id: `remote-older-${loadedOlderPages}`,
+            kind: "assistant",
+            title: "Rika",
+            text: "Loaded from hosted history",
+          },
+          ...previous,
+        ])
+      },
     }),
   { width: 100, height: 30, exitOnCtrlC: false },
 )
@@ -102,7 +115,11 @@ try {
   screen.mockInput.pressKey("HOME")
   await screen.flush()
   assert.match(screen.captureCharFrame(), /Retained older page/)
-  setItems((previous) => previous.slice(1))
+  screen.mockInput.pressKey("HOME")
+  await screen.flush()
+  assert.equal(loadedOlderPages, 1)
+  assert.match(screen.captureCharFrame(), /Loaded from hosted history/)
+  setItems((previous) => previous.slice(2))
   await screen.flush()
 
   screen.mockInput.pressKey("END")

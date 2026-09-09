@@ -1,15 +1,11 @@
 /* oxlint-disable anti-slop/no-runtime-typeof -- Prompt's public union encodes string-or-parts content. */
 /* oxlint-disable anti-slop/no-conditional-empty-object-spread -- projection omits optional wire fields intentionally. */
+/* oxlint-disable max-lines -- the reducer keeps snapshot, cursor, preview, and retained-family invariants together. */
 /* oxlint-disable complexity -- preview fencing keeps identity, attempt, generation, sequence, and offset guards atomic. */
 /* oxlint-disable effecttsgo/missing-pipeable-signature -- reducers consume state and event as one atomic pair. */
 /* oxlint-disable typescript/no-unsafe-assignment -- map entries retain the typed PreviewProjection values. */
 import type { Prompt } from "effect/unstable/ai"
-import type {
-  ConnectionEvent,
-  ConnectionStatus,
-  HostSessionSnapshot,
-  ServerEvent,
-} from "generalist/server"
+import type { ConnectionEvent, ConnectionStatus, HostSessionSnapshot, ServerEvent } from "generalist/server"
 
 export type ProjectionActivity = "idle" | "working" | "waiting" | "cancelled" | "failed"
 
@@ -20,6 +16,29 @@ export interface ProjectionItem {
   readonly text: string
   readonly status?: ProjectionActivity
   readonly language?: string
+  readonly childSessionId?: string
+}
+
+export interface RetainedSession {
+  readonly id: string
+  readonly rootSessionId: string
+  readonly parentSessionId: string | null
+  readonly parentRunId: string | null
+  readonly initialRunId: string
+  readonly depth: number
+}
+
+export interface FamilyProjection {
+  readonly rootSessionId: string
+  readonly at: number
+  readonly sessions: readonly RetainedSession[]
+  readonly nextBefore: number | null
+}
+
+export interface CollaboratorProjection {
+  readonly sessionId: string
+  readonly depth: number
+  readonly loaded: boolean
 }
 
 export interface ProjectionPendingTurn {
@@ -38,6 +57,7 @@ export interface ProjectionThread {
   readonly pending: readonly ProjectionPendingTurn[]
   readonly approval: null | { readonly id: string; readonly title: string; readonly detail: string }
   readonly activeRunId?: string
+  readonly collaborators?: readonly CollaboratorProjection[]
 }
 
 export interface PreviewProjection {
@@ -69,6 +89,7 @@ export interface ProjectionState {
   readonly connectionEpoch: number
   readonly committedCursor: number
   readonly needsSnapshot: boolean
+  readonly family?: FamilyProjection | undefined
 }
 
 export type ProjectionResult =
@@ -111,7 +132,15 @@ const messageItem = (
   status: ProjectionActivity,
 ): ProjectionItem[] => {
   if (typeof message.content === "string")
-    return [{ id: `${entryId}:message:${messageIndex}`, kind: message.role, title: message.role, text: message.content, status }]
+    return [
+      {
+        id: `${entryId}:message:${messageIndex}`,
+        kind: message.role,
+        title: message.role,
+        text: message.content,
+        status,
+      },
+    ]
   return message.content.map((part, partIndex): ProjectionItem => {
     const id = `${entryId}:message:${messageIndex}:part:${partIndex}`
     if (part.type === "reasoning") return { id, kind: "reasoning", title: "Reasoning", text: part.text, status }
@@ -129,23 +158,42 @@ const messageItem = (
 const itemsFromSnapshot = (
   snapshot: HostSessionSnapshot,
   previews: ReadonlyMap<string, PreviewProjection> = new Map(),
+  family: FamilyProjection | undefined,
 ): readonly ProjectionItem[] => {
   const items: ProjectionItem[] = []
+  const sessionsByInitialRun = new Map((family?.sessions ?? []).map((session) => [session.initialRunId, session]))
+  const emittedSessions = new Set<string>()
   for (const entry of snapshot.conversation.entries) {
     const status = itemStatus(snapshot, entry.id)
-    for (const [messageIndex, message] of entry.messages.entries()) items.push(...messageItem(entry.id, messageIndex, message, status))
+    for (const [messageIndex, message] of entry.messages.entries())
+      items.push(...messageItem(entry.id, messageIndex, message, status))
   }
   for (const run of snapshot.runs) {
     if (run.parentRunId === undefined) continue
+    const session = sessionsByInitialRun.get(run.runId) ?? sessionsByInitialRun.get(run.rootRunId)
+    if (session !== undefined && emittedSessions.has(session.id)) continue
+    if (session !== undefined) emittedSessions.add(session.id)
     let status: ProjectionActivity = "working"
     if (run.status === "succeeded") status = "idle"
     else if (run.status === "failed") status = "failed"
     items.push({
-      id: `child:${run.runId}`,
+      id: session === undefined ? `child:${run.runId}` : `child-session:${session.id}`,
       kind: "child",
-      title: run.runId,
+      title: session?.id ?? run.runId,
       text: run.status,
       status,
+      ...(session === undefined ? {} : { childSessionId: session.id }),
+    })
+  }
+  for (const session of family?.sessions ?? []) {
+    if (session.id === family?.rootSessionId || emittedSessions.has(session.id)) continue
+    emittedSessions.add(session.id)
+    items.push({
+      id: `child-session:${session.id}`,
+      kind: "child",
+      title: session.id,
+      text: "",
+      childSessionId: session.id,
     })
   }
   for (const preview of previews.values()) {
@@ -177,7 +225,9 @@ const pendingFromSnapshot = (snapshot: HostSessionSnapshot): readonly Projection
     images: item.prompt.content.flatMap((message) =>
       message.role === "user" && typeof message.content !== "string"
         ? message.content.flatMap((part) =>
-            part.type === "file" ? [{ mediaType: part.mediaType, ...(part.fileName === undefined ? {} : { fileName: part.fileName }) }] : [],
+            part.type === "file"
+              ? [{ mediaType: part.mediaType, ...(part.fileName === undefined ? {} : { fileName: part.fileName }) }]
+              : [],
           )
         : [],
     ),
@@ -196,6 +246,7 @@ export const projectSnapshot = (input: {
   readonly target?: "runner" | "orb"
   readonly previousPreviews?: ReadonlyMap<string, PreviewProjection>
   readonly previousPreviewFences?: ReadonlyMap<string, PreviewFence>
+  readonly family?: FamilyProjection | undefined
 }): ProjectionState => {
   const { sessionId, snapshot } = input
   const target = input.target ?? "runner"
@@ -216,10 +267,23 @@ export const projectSnapshot = (input: {
     title: snapshot.session.title ?? `Thread ${sessionId}`,
     target,
     activity: activityFromSnapshot(snapshot),
-    items: itemsFromSnapshot(snapshot, previousPreviews),
+    items: itemsFromSnapshot(snapshot, previousPreviews, input.family),
     pending: pendingFromSnapshot(snapshot),
     approval: null,
     ...(snapshot.session.activeRunId === undefined ? {} : { activeRunId: snapshot.session.activeRunId }),
+    ...(input.family === undefined
+      ? {}
+      : {
+          collaborators: input.family.sessions
+            .filter((session) => session.id !== input.family?.rootSessionId)
+            .map((session) => ({
+              sessionId: session.id,
+              depth: session.depth,
+              loaded: snapshot.runs.some(
+                (run) => run.runId === session.initialRunId || run.rootRunId === session.initialRunId,
+              ),
+            })),
+        }),
   }
   return {
     sessionId,
@@ -230,6 +294,7 @@ export const projectSnapshot = (input: {
     connectionEpoch: 0,
     committedCursor: snapshot.cursor,
     needsSnapshot: false,
+    ...(input.family === undefined ? {} : { family: input.family }),
   }
 }
 
@@ -238,17 +303,18 @@ const applyConversation = (
   update: Extract<ServerEvent, { readonly _tag: "Conversation" }>["update"],
 ): HostSessionSnapshot | undefined => {
   if (update.previousLeafId !== snapshot.conversation.leafId) return undefined
-  const entries = update.reset === true
-    ? [...update.entries]
-    : [
-        ...snapshot.conversation.entries.slice(
-          0,
-          update.afterEntryId === null
-            ? 0
-            : snapshot.conversation.entries.findIndex((entry) => entry.id === update.afterEntryId) + 1,
-        ),
-        ...update.entries,
-      ]
+  const entries =
+    update.reset === true
+      ? [...update.entries]
+      : [
+          ...snapshot.conversation.entries.slice(
+            0,
+            update.afterEntryId === null
+              ? 0
+              : snapshot.conversation.entries.findIndex((entry) => entry.id === update.afterEntryId) + 1,
+          ),
+          ...update.entries,
+        ]
   return {
     ...snapshot,
     conversation: {
@@ -274,6 +340,7 @@ const withSnapshot = (
     target: state.thread.target,
     previousPreviews: previews,
     previousPreviewFences: previewFences,
+    family: state.family,
   })
   return { ...next, previewFences, connectionEpoch }
 }
@@ -309,7 +376,10 @@ const previewEvent = (event: Extract<ServerEvent, { readonly _tag: "PreviewDeliv
   }
 }
 
-const applyPreview = (state: ProjectionState, event: Extract<ServerEvent, { readonly _tag: "PreviewDelivery" }>): ProjectionResult => {
+const applyPreview = (
+  state: ProjectionState,
+  event: Extract<ServerEvent, { readonly _tag: "PreviewDelivery" }>,
+): ProjectionResult => {
   if (event.sessionId !== state.sessionId || event.runId !== event.event.runId)
     return { _tag: "Rejected", state, reason: "Preview belongs to another Session or Run" }
   const incoming = previewEvent(event)
@@ -330,7 +400,8 @@ const applyPreview = (state: ProjectionState, event: Extract<ServerEvent, { read
     }
     if (current !== undefined) {
       if (incoming.attemptFence < current.attemptFence) return { _tag: "Ignored", state }
-      if (incoming.attemptFence === current.attemptFence && incoming.generation < current.generation) return { _tag: "Ignored", state }
+      if (incoming.attemptFence === current.attemptFence && incoming.generation < current.generation)
+        return { _tag: "Ignored", state }
       if (
         incoming.attemptFence === current.attemptFence &&
         incoming.generation === current.generation &&
@@ -344,7 +415,8 @@ const applyPreview = (state: ProjectionState, event: Extract<ServerEvent, { read
     let text = current?.text ?? ""
     for (const change of body.changes) {
       const value = change.channel === "reasoning" ? reasoning : text
-      if (change.offset > value.length) return { _tag: "Rejected", state, reason: "Preview offset exceeded current source" }
+      if (change.offset > value.length)
+        return { _tag: "Rejected", state, reason: "Preview offset exceeded current source" }
       const next = value.slice(0, change.offset) + change.delta
       if (change.channel === "reasoning") reasoning = next
       else text = next
@@ -377,6 +449,7 @@ const applyPreview = (state: ProjectionState, event: Extract<ServerEvent, { read
           target: state.thread.target,
           previousPreviews: previews,
           previousPreviewFences: previewFences,
+          family: state.family,
         }).thread,
       },
     }
@@ -412,13 +485,16 @@ export const applyConnectionEvent = (state: ProjectionState, event: ConnectionEv
       threadId: state.thread.id,
       snapshot: event.snapshot,
       target: state.thread.target,
+      family: state.family,
     })
     return { _tag: "Applied", state: { ...next, previewFences: state.previewFences, connectionEpoch: event.epoch } }
   }
   if (event._tag === "PreviewDelivery") return applyPreview(state, event)
-  if (event.sessionId !== state.sessionId) return { _tag: "Rejected", state, reason: "Event belongs to another Session" }
+  if (event.sessionId !== state.sessionId)
+    return { _tag: "Rejected", state, reason: "Event belongs to another Session" }
   if (event.cursor <= state.committedCursor) return { _tag: "Ignored", state }
-  if (event.cursor !== state.committedCursor + 1) return { _tag: "Rejected", state: { ...state, needsSnapshot: true }, reason: "Committed cursor is not contiguous" }
+  if (event.cursor !== state.committedCursor + 1)
+    return { _tag: "Rejected", state: { ...state, needsSnapshot: true }, reason: "Committed cursor is not contiguous" }
   let snapshot = state.snapshot
   if (event._tag === "Conversation") {
     const updated = applyConversation(snapshot, event.update)
@@ -428,8 +504,14 @@ export const applyConnectionEvent = (state: ProjectionState, event: ConnectionEv
   }
   snapshot = { ...snapshot, cursor: event.cursor }
   const previews = new Map(state.previews)
-  if (event._tag === "Conversation" && event.update.entries.some((entry) => entry.messages.some((message) => message.role === "assistant"))) {
+  if (
+    event._tag === "Conversation" &&
+    event.update.entries.some((entry) => entry.messages.some((message) => message.role === "assistant"))
+  ) {
     for (const runId of previews.keys()) previews.delete(runId)
   }
-  return { _tag: "Applied", state: withSnapshot({ ...state, snapshot, committedCursor: event.cursor }, snapshot, previews, state.previewFences) }
+  return {
+    _tag: "Applied",
+    state: withSnapshot({ ...state, snapshot, committedCursor: event.cursor }, snapshot, previews, state.previewFences),
+  }
 }

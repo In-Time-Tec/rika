@@ -29,7 +29,8 @@ const executable = ExecutableManifest.makeTest("hosted-client")("agent")
 
 const product = (): ProductClient => ({
   identity: Effect.succeed({ userId: "user", ownerId: "owner" }),
-  listThreads: () => Effect.succeed({ threads: [{ id: "thread", title: "Hosted", target: "runner" }], nextCursor: null }),
+  listThreads: () =>
+    Effect.succeed({ threads: [{ id: "thread", title: "Hosted", target: "runner" }], nextCursor: null }),
   thread: () => Effect.succeed({ id: "thread", title: "Hosted", target: "runner" }),
   access: () => Effect.succeed({ threadId: "thread", role: "controller" }),
   catalog: Effect.succeed({ modes: [] }),
@@ -45,12 +46,33 @@ const waitForDetached = (millis: number) =>
 
 it.effect("routes hosted follow-up, stop, and cancel controls to the canonical client", () => {
   const calls = { submit: [] as string[], control: [] as string[], cancel: [] as string[] }
-  const connection = { snapshot, events: Stream.empty, status: Stream.empty, exhausted: Effect.never, cancel: () => Effect.void }
+  const connection = {
+    snapshot,
+    events: Stream.empty,
+    status: Stream.empty,
+    exhausted: Effect.never,
+    cancel: () => Effect.void,
+  }
   const execution = {
     raw: {},
     snapshot: () => Effect.succeed(snapshot),
     history: () => Effect.succeed({ leafId: null, entries: [], nextLeafId: null }),
-    family: () => Effect.succeed({ rootSessionId: "session", at: 0, sessions: [], nextBefore: null }),
+    family: () =>
+      Effect.succeed({
+        rootSessionId: "session",
+        at: 0,
+        sessions: [
+          {
+            id: "retained-child",
+            rootSessionId: "session",
+            parentSessionId: "session",
+            parentRunId: "run",
+            initialRunId: "child-run",
+            depth: 1,
+          },
+        ],
+        nextBefore: null,
+      }),
     submit: ({ sessionId }: { readonly sessionId: string }) =>
       Effect.sync(() => {
         calls.submit.push(sessionId)
@@ -78,6 +100,8 @@ it.effect("routes hosted follow-up, stop, and cancel controls to the canonical c
     webSocketConstructor: () => ({}) as WebSocket,
   })
   return Effect.gen(function* () {
+    yield* waitForDetached(50)
+    client.openChildSession?.("retained-child")
     yield* waitForDetached(50)
     client.followUp("continue", "retained-child")
     client.stop()
@@ -185,7 +209,12 @@ it.effect("does not remove queued input when steering fails", () => {
     connect: () => Effect.succeed(connection),
     subscribe: () => Stream.empty,
   } as unknown as ExecutionClient
-  const client = createHostedClient({ product: product(), execution, initialThreadId: "thread", webSocketConstructor: () => ({}) as WebSocket })
+  const client = createHostedClient({
+    product: product(),
+    execution,
+    initialThreadId: "thread",
+    webSocketConstructor: () => ({}) as WebSocket,
+  })
   return Effect.gen(function* () {
     yield* waitForDetached(50)
     client.steerPending("pending")
@@ -193,6 +222,62 @@ it.effect("does not remove queued input when steering fails", () => {
     expect(calls).toEqual({ remove: 0, steer: 1 })
     expect(client.state.notice).toContain("steering rejected")
     expect(client.state.threads[0]?.pending[0]?.id).toBe("pending")
+    yield* client.dispose
+  })
+})
+
+it.effect("loads an older hosted history page through the public TUI client", () => {
+  const pagingSnapshot = {
+    ...snapshot,
+    conversation: {
+      leafId: "latest",
+      entries: [{ id: "current", parentId: "anchor", messages: [{ role: "assistant", content: "Current" }] }],
+      nextLeafId: "anchor",
+    },
+  } as unknown as GeneralistSnapshot
+  let historyCalls = 0
+  const connection = {
+    snapshot: pagingSnapshot,
+    events: Stream.empty,
+    status: Stream.empty,
+    exhausted: Effect.never,
+    cancel: () => Effect.void,
+  }
+  const execution = {
+    raw: {},
+    snapshot: () => Effect.succeed(pagingSnapshot),
+    history: () =>
+      Effect.sync(() => {
+        historyCalls += 1
+        return {
+          leafId: "anchor",
+          entries: [{ id: "older", parentId: "root", messages: [{ role: "assistant", content: "Loaded older" }] }],
+          nextLeafId: null,
+        }
+      }),
+    family: () => Effect.succeed({ rootSessionId: "session", at: 0, sessions: [], nextBefore: null }),
+    submit: () => Effect.succeed({ id: "receipt", revision: 1 }),
+    updateInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    removeInput: () => Effect.succeed({ id: "pending", revision: 2 }),
+    steer: () => Effect.void,
+    cancel: () => Effect.void,
+    control: () => Effect.void,
+    runs: () => Effect.succeed([]),
+    connect: () => Effect.succeed(connection),
+    subscribe: () => Stream.empty,
+  } as unknown as ExecutionClient
+  const client = createHostedClient({
+    product: product(),
+    execution,
+    initialThreadId: "thread",
+    webSocketConstructor: () => ({}) as WebSocket,
+  })
+  return Effect.gen(function* () {
+    yield* waitForDetached(50)
+    client.loadOlder?.()
+    yield* waitForDetached(50)
+    expect(historyCalls).toBe(1)
+    expect(client.state.threads[0]?.items.some((item) => item.text === "Loaded older")).toBe(true)
     yield* client.dispose
   })
 })

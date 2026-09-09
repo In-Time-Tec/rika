@@ -146,6 +146,7 @@ const ChildRow = (props: {
   readonly animate: Accessor<boolean>
   readonly toggle: () => void
   readonly select: () => void
+  readonly open: (sessionId: string) => void
 }) => {
   const animation = createVisibleFrame(props.frame)
   const expandable = () => props.item.text.trim().length > 0
@@ -158,17 +159,26 @@ const ChildRow = (props: {
         selectable={false}
         onMouseDown={() => {
           props.select()
+          if (props.item.childSessionId !== undefined) {
+            props.open(props.item.childSessionId)
+            return
+          }
           if (expandable()) props.toggle()
         }}
         wrapMode="none"
       >
         <span style={{ fg: colors.subtle }}>{props.last ? "└ " : "├ "}</span>
         <span style={{ fg: props.selected() ? colors.blue : statusColor(props.item.status), bold: props.selected() }}>
-          {statusGlyph(props.item.status, isActive(props.item.status) ? animation.frame() : 0, props.animate())}
+          {props.item.status === undefined
+            ? "·"
+            : statusGlyph(props.item.status, isActive(props.item.status) ? animation.frame() : 0, props.animate())}
         </span>
         <span style={{ fg: props.selected() ? colors.blue : colors.text, bold: props.selected() }}>
           {` ${titleFor(props.item)}`}
         </span>
+        <Show when={props.item.childSessionId !== undefined}>
+          <span style={{ fg: props.selected() ? colors.blue : colors.muted }}> {"· Open collaborator"}</span>
+        </Show>
         <Show when={expandable()}>
           <span style={{ fg: props.selected() ? colors.blue : colors.subtle }}>{props.expanded() ? " ▾" : " ▸"}</span>
         </Show>
@@ -190,6 +200,7 @@ interface ChildGroupViewProps {
   readonly toggle: (id: string, fallback: boolean) => void
   readonly selected: Accessor<string | undefined>
   readonly select: (id: string) => void
+  readonly open: (sessionId: string) => void
 }
 
 const ChildGroupView = (props: ChildGroupViewProps) => (
@@ -207,6 +218,7 @@ const ChildGroupView = (props: ChildGroupViewProps) => (
             animate={props.animate}
             toggle={() => props.toggle(item.id, isActive(item.status))}
             select={() => props.select(item.id)}
+            open={props.open}
           />
         )
       }}
@@ -309,6 +321,7 @@ interface GroupViewProps {
   readonly toggle: (id: string, fallback: boolean) => void
   readonly selected: Accessor<string | undefined>
   readonly select: (id: string) => void
+  readonly open: (sessionId: string) => void
 }
 
 export const GroupView = (props: GroupViewProps) => (
@@ -336,6 +349,7 @@ export const GroupView = (props: GroupViewProps) => (
           toggle={props.toggle}
           selected={props.selected}
           select={props.select}
+          open={props.open}
         />
       )}
     </Match>
