@@ -53,7 +53,7 @@
       "@types/pg": "8.15.5",
       "@types/prismjs": "1.26.6",
       "@vitest/coverage-v8": "4.1.11",
-      "alchemy": "https://pkg.ing/alchemy/59573d7",
+      "alchemy": "2.0.0-beta.77",
       "better-auth": "1.7.1",
       "cli-spinners": "3.4.0",
       "drizzle-orm": "1.0.0-rc.5-169397b",

@@ -54,6 +54,7 @@ export default defineRailway(() => {
       GITHUB_APP_ID: preserve(), GITHUB_APP_PRIVATE_KEY: preserve(), GITHUB_CLIENT_ID: preserve(),
       GITHUB_CLIENT_SECRET: preserve(), NODE_ENV: preserve(), PORT: preserve(), RESEND_API_KEY: preserve(),
       RIKA_API_REVISION: preserve(), RIVET_ENDPOINT: "http://rivet.railway.internal:6420",
+      RIVET_NAMESPACE: "default",
       RIKA_BOX_PROVIDER_SCOPE: preserve(), RIKA_BOX_TEMPLATE_BOX_ID: preserve(),
       RIKA_BOX_TEMPLATE_SNAPSHOT_ID: preserve(), RIKA_MODEL_ID: preserve(), RIKA_MODEL_PROVIDER: preserve(),
       RIKA_PROVIDER_CREDENTIAL_KEY: preserve(), RIKA_PROXY_PUBLIC_DOMAIN: preserve(),
