@@ -1,6 +1,14 @@
 {
   "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
-  "plugins": ["eslint", "typescript", "oxc", "unicorn", "import", "promise", "effecttsgo"],
+  "plugins": [
+    "eslint",
+    "typescript",
+    "oxc",
+    "unicorn",
+    "import",
+    "promise",
+    "effecttsgo"
+  ],
   "jsPlugins": [
     {
       "name": "anti-slop",
@@ -21,12 +29,29 @@
   },
   "rules": {
     "accessor-pairs": "error",
-    "complexity": ["error", 15],
-    "eqeqeq": ["error", "always", { "null": "ignore" }],
-    "max-lines": ["error", 500],
+    "complexity": [
+      "error",
+      15
+    ],
+    "eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
+    "max-lines": [
+      "error",
+      500
+    ],
     "no-case-declarations": "error",
     "no-constructor-return": "error",
-    "no-duplicate-imports": ["error", { "allowSeparateTypeImports": true }],
+    "no-duplicate-imports": [
+      "error",
+      {
+        "allowSeparateTypeImports": true
+      }
+    ],
     "no-fallthrough": "error",
     "no-nested-ternary": "error",
     "no-new-func": "error",
@@ -62,7 +87,12 @@
     "anti-slop/no-widen-then-assert": "error",
     "anti-slop/require-safety-comment-for-type-assertion": "error",
     "anti-slop-effect/no-service-constructor-imports": "error",
-    "import/no-cycle": ["error", { "ignoreTypes": true }],
+    "import/no-cycle": [
+      "error",
+      {
+        "ignoreTypes": true
+      }
+    ],
     "import/no-unassigned-import": "off",
     "oxc/no-const-enum": "error",
     "oxc/no-map-spread": "off",
@@ -193,19 +223,25 @@
   },
   "overrides": [
     {
-      "files": ["apps/api/src/main.ts"],
+      "files": [
+        "apps/api/src/main.ts"
+      ],
       "rules": {
         "effecttsgo/strict-effect-provide": "off"
       }
     },
     {
-      "files": ["apps/rika/src/platform/diagnostic-file-host.ts"],
+      "files": [
+        "apps/rika/src/platform/diagnostic-file-host.ts"
+      ],
       "rules": {
         "effecttsgo/node-builtin-import": "off"
       }
     },
     {
-      "files": ["**/test/**"],
+      "files": [
+        "**/test/**"
+      ],
       "rules": {
         "anti-slop-effect/no-service-constructor-imports": "off",
         "effecttsgo/missing-pipeable-signature": "off",
@@ -213,17 +249,39 @@
       }
     },
     {
-      "files": ["alchemy.run.ts", "vitest.config.ts"],
+      "files": [
+        "alchemy.run.ts",
+        "vitest.config.ts"
+      ],
       "rules": {
         "effecttsgo/duplicate-package": "off"
       }
     },
     {
-      "files": ["apps/tui-v2/**", "packages/runner/**"],
+      "files": [
+        "apps/tui-v2/**",
+        "packages/runner/**"
+      ],
       "rules": {
         "effecttsgo/duplicate-package": "off"
       }
+    },
+    {
+      "files": [
+        "infra/rivet/start.ts"
+      ],
+      "rules": {
+        "effecttsgo/node-builtin-import": "off",
+        "effecttsgo/process-env": "off",
+        "typescript/no-unsafe-type-assertion": "off"
+      }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", ".turbo", ".agents", "tools/oxlint/anti-slop"]
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    ".turbo",
+    ".agents",
+    "tools/oxlint/anti-slop"
+  ]
 }

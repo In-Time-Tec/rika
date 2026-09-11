@@ -112,6 +112,26 @@ describe("ApiV2ProductionConfig", () => {
     }),
   )
 
+  it.effect("permits plaintext endpoints only inside the Railway private mesh", () =>
+    Effect.gen(function* () {
+      const config = yield* loadApiV2ProductionConfig({
+        ...productionEnvironment,
+        RIVET_ENDPOINT: "http://rivet.railway.internal:6420",
+      })
+      expect(config.rivet.endpoint).toBe("http://rivet.railway.internal:6420")
+      const publicHttp = yield* configFailure({
+        ...productionEnvironment,
+        RIVET_ENDPOINT: "http://rivet.example.com",
+      })
+      expect(publicHttp).toMatchObject({ dependency: "rivet" })
+      const storagePrivate = yield* loadApiV2ProductionConfig({
+        ...productionEnvironment,
+        RIKA_RUNTIME_STORAGE_ENDPOINT: "http://minio.railway.internal:9000",
+      })
+      expect(storagePrivate.runtimeStorage.endpoint).toBe("http://minio.railway.internal:9000")
+    }),
+  )
+
   it.effect("requires stable runtime, revision, storage, and Rivet identities", () =>
     Effect.gen(function* () {
       for (const name of [

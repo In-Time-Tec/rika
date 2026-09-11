@@ -1,9 +1,30 @@
+import { createRequire } from "node:module"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawn } from "node:child_process"
 
-const { getEnginePath } = require("@rivetkit/engine-cli")
+interface EngineCli {
+  getEnginePath(): string
+}
+
+// The engine-cli package is a direct dependency inside the infra/rivet image and a rivetkit
+// transitive dependency inside the repository workspace.
+const loadEngineCli = (): EngineCli => {
+  const localRequire = createRequire(import.meta.url)
+  try {
+    // SAFETY: the published CommonJS package exports exactly getEnginePath; the shape is pinned by
+    // infra/rivet/package.json and exercised by the API's test fixtures.
+    return localRequire("@rivetkit/engine-cli") as EngineCli
+  } catch {
+    const fromApi = createRequire(join(import.meta.dir, "../../apps/api/package.json"))
+    const throughRivetkit = createRequire(fromApi.resolve("rivetkit"))
+    // SAFETY: same published CommonJS export resolved through the rivetkit dependency boundary.
+    return throughRivetkit("@rivetkit/engine-cli") as EngineCli
+  }
+}
+
+const { getEnginePath } = loadEngineCli()
 
 const guardHost = process.env.RIVET__GUARD__HOST ?? "::"
 const guardPort = Number(process.env.RIVET__GUARD__PORT ?? "6420")

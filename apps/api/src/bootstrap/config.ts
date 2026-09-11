@@ -111,7 +111,8 @@ const endpoint = (
   Effect.try({
     try: () => {
       const parsed = new URL(value)
-      const protocols = production ? ["https:"] : ["http:", "https:"]
+      const privateMesh = parsed.hostname.endsWith(".railway.internal")
+      const protocols = !production || privateMesh ? ["http:", "https:"] : ["https:"]
       if (!protocols.includes(parsed.protocol)) throw new TypeError("unsupported protocol")
       if (parsed.username.length > 0 || parsed.password.length > 0) throw new TypeError("embedded credentials")
       if (parsed.search.length > 0) throw new TypeError("query")
