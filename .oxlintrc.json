@@ -275,6 +275,14 @@
         "effecttsgo/process-env": "off",
         "typescript/no-unsafe-type-assertion": "off"
       }
+    },
+    {
+      "files": [
+        ".railway/railway.ts"
+      ],
+      "rules": {
+        "effecttsgo/missing-pipeable-signature": "off"
+      }
     }
   ],
   "ignorePatterns": [
