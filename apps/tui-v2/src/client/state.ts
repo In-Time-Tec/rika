@@ -37,6 +37,9 @@ export const stateFromFixture = (fixture: ScenarioFixture): StoreState => {
     mode: "medium",
     connection: fixture.connection,
     notice: fixture.notice,
+    workspace: "",
+    branch: undefined,
+    previews: {},
     focusedSessionId: undefined,
   }
 }

@@ -66,6 +66,9 @@ export function createWorkload(size: WorkloadSize) {
     mode: "medium",
     connection: "offline",
     notice: "Synthetic renderer benchmark: no agent execution or workspace access",
+    workspace: "",
+    branch: undefined,
+    previews: {},
     threads: Array.from({ length: size.threads }, (_, index) => ({
       id: `thread-${index}`,
       title: `Synthetic thread ${index}`,
@@ -110,6 +113,7 @@ export function createWorkload(size: WorkloadSize) {
     steerPending: unsupported,
     interruptAndSend: unsupported,
     selectThread: (id) => setState("selectedThreadId", id),
+    previewThread: () => {},
     setMode: (mode) => setState("mode", mode),
     dispose: Effect.void,
   }

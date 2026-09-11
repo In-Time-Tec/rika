@@ -14,7 +14,7 @@ const InstallationDisk = Schema.Struct({
   ),
 })
 
-type GitOutput = (workspace: string, arguments_: ReadonlyArray<string>) => Effect.Effect<string | undefined>
+export type GitOutput = (workspace: string, arguments_: ReadonlyArray<string>) => Effect.Effect<string | undefined>
 
 export interface InstallationRequest {
   readonly deviceId: string
@@ -67,7 +67,7 @@ const safeRemote = (value: string | undefined) => {
   }
 }
 
-const liveGitOutput =
+export const liveGitOutput =
   (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]): GitOutput =>
   (workspace, arguments_) =>
     Effect.scoped(

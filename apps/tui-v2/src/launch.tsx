@@ -7,6 +7,7 @@ import type { CliRendererErrorEvent, CliRendererHandlerErrorEvent } from "@opent
 import { render } from "@opentui/solid"
 import { Config, Console, Crypto, Data, Deferred, Effect } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import { ErrorBoundary } from "solid-js"
 import { makeExecutionClient, makeGeneralistClient, type GeneralistTransportAuth } from "@rika/client/generalist"
 import { makeFileCredentialAuth, type FileCredentialAuth } from "@rika/client/credentials"
@@ -18,6 +19,7 @@ import { App } from "./app"
 import {
   Installation,
   layer as installationLayer,
+  liveGitOutput,
   type InstallationRequest,
   type PreparedInstallation,
 } from "./client/installation"
@@ -215,6 +217,8 @@ const makeOnlineResource = Effect.fn("TuiV2.makeOnlineResource")(function* (
     workspaceSeeds,
     workspace: startup.installation.workspacePath,
   }
+  const branch = startup.installation.profile.repository.branch
+  if (branch !== undefined) Object.assign(clientOptions, { branch })
   if (connection.initialPrompt !== undefined) Object.assign(clientOptions, { initialPrompt: connection.initialPrompt })
   return {
     client: createThreadClient(clientOptions),
@@ -230,11 +234,26 @@ const runTui = Effect.fn("TuiV2.runTui")(function* (options: LaunchOptions) {
   const quit = yield* Deferred.make<void, TerminalFailure>()
   const makeResource =
     options.connection === undefined
-      ? Effect.sync<ClientResource>(() => ({
-          client: createClient({ scenario: options.scenario }),
-          workspace: offlineWorkspace,
-          dispose: Effect.void,
-        }))
+      ? Effect.gen(function* () {
+          const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const branch = yield* liveGitOutput(spawner)(offlineWorkspace, [
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+          ])
+          const clientOptions: Parameters<typeof createClient>[0] = {
+            scenario: options.scenario,
+            workspace: offlineWorkspace,
+          }
+          if (branch !== undefined) Object.assign(clientOptions, { branch })
+          const resource: ClientResource = {
+            client: createClient(clientOptions),
+            workspace: offlineWorkspace,
+            dispose: Effect.void,
+          }
+          return resource
+        })
       : makeOnlineResource(options.connection)
   const resource = yield* Effect.acquireRelease(makeResource, (current) =>
     current.client.dispose.pipe(Effect.andThen(current.dispose)),

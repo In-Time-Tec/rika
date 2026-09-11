@@ -14,6 +14,7 @@ export interface FileSidebarProps {
   readonly kind: "workspace" | "changed"
   readonly width: number
   readonly mode: Mode
+  readonly workspace: string
   readonly open: (path: string) => void
 }
 
@@ -29,7 +30,7 @@ const changedFilesFor = (diffs: readonly TranscriptItem[]) =>
   })
 
 const fileRowsFor = (props: FileSidebarProps) => {
-  const model = initial("/workspace", props.mode)
+  const model = initial(props.workspace.length === 0 ? process.cwd() : props.workspace, props.mode)
   return sidebarFileRows(
     {
       ...model,

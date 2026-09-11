@@ -78,7 +78,11 @@ export const makeGeneralistClient = (options: {
       client = HttpClient.mapRequestInputEffect(
         base,
         (request) => {
-          const url = new URL(request.url, options.baseUrl)
+          const baseUrl = new URL(options.baseUrl)
+          const basePath = baseUrl.pathname.replace(/\/$/, "")
+          const url = /^[a-z][a-z0-9+.-]*:/i.test(request.url)
+            ? new URL(request.url)
+            : new URL(`${basePath}${request.url.startsWith("/") ? request.url : `/${request.url}`}`, baseUrl)
           const query = UrlParams.toString(request.urlParams)
           if (query.length > 0) url.search = query
           return requestHeaders({ method: request.method, url: url.toString() }).pipe(

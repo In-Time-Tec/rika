@@ -62,7 +62,7 @@ const createController = (props: AppProps) => {
   const selectedId = () => props.client.state.selectedThreadId
   const selectedThread = createMemo(() => props.client.state.threads.find((thread) => thread.id === selectedId()))
   const { drafts, setDrafts, draftAttachments, setAttachmentsFor, updateDraft, expandDraft, imagesFor, handlePaste } =
-    createDrafts(selectedId, () => editing()?.id)
+    createDrafts(selectedId, () => editing()?.id, () => props.client.state.workspace)
   const hasTranscript = () => (selectedThread()?.items.length ?? 0) > 0
   const narrow = () => dimensions().width < 60
   const contextual = createMemo(() => {
@@ -107,6 +107,12 @@ const createController = (props: AppProps) => {
     },
   })
   const fileSidebarWidth = () => Math.max(24, Math.min(52, Math.floor(dimensions().width * 0.4)))
+  createEffect(() => {
+    if (overlay() !== "threads") return
+    const thread = threadEntries()[threadPickerIndex()]
+    if (thread !== undefined && thread.items.length === 0 && props.client.state.previews[thread.id] === undefined)
+      props.client.previewThread(thread.id)
+  })
   const contentWidth = createMemo(
     () =>
       dimensions().width -

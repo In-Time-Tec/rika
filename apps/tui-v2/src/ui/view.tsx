@@ -16,8 +16,25 @@ import {
 import { ThreadSwitcherOverlay } from "./thread-overlay"
 import { colors } from "./theme"
 
+const homeRoot = /^(?:\/Users|\/home|\/var\/home)\/[^/]+(?=\/|$)/
+
+const homeRelativePath = (path: string): string => path.replace(homeRoot, "~")
+
+const compactWorkspace = (workspace: string): string => {
+  const home = homeRelativePath(workspace)
+  const segments = home.split("/").filter((segment) => segment.length > 0)
+  if (segments.length <= 5) return home
+  return [segments.slice(0, 2).join("/"), "…", segments.slice(-2).join("/")].join("/")
+}
+
 export function AppView(props: AppProps & { readonly state: AppViewState }) {
   const state = props.state
+  const workspaceLabel = () => {
+    const workspace = props.client.state.workspace
+    if (workspace.length === 0) return ""
+    const branch = props.client.state.branch
+    return `${compactWorkspace(workspace)}${branch === undefined ? "" : ` (${branch})`}`
+  }
   const {
     hasTranscript,
     setFocus,
@@ -67,16 +84,6 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
     <box width="100%" height="100%" flexDirection="column" backgroundColor={colors.surface} overflow="hidden">
       <box flexGrow={1} minHeight={0} width="100%" flexDirection="row">
         <box flexGrow={1} minWidth={0} minHeight={0} flexDirection="column">
-          <Show when={props.client.state.connection !== "offline" && props.client.state.connection !== "connected"}>
-            <text
-              width="100%"
-              height={1}
-              flexShrink={0}
-              truncate
-              fg={colors.amber}
-              content={props.client.state.notice}
-            />
-          </Show>
           <Show
             when={hasTranscript()}
             fallback={<WelcomePanel client={props.client} animate={props.animate !== false} width={contentWidth()} />}
@@ -134,6 +141,8 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
             thread={selectedThread}
             mode={() => props.client.state.mode}
             threadId={selectedId}
+            notice={() => props.client.state.notice}
+            workspace={workspaceLabel}
             focused={focus() === "composer" && overlay() === undefined}
             drafts={drafts}
             updateDraft={updateDraft}
@@ -157,6 +166,7 @@ export function AppView(props: AppProps & { readonly state: AppViewState }) {
             kind={sidebarKind()!}
             width={fileSidebarWidth()}
             mode={props.client.state.mode}
+            workspace={props.client.state.workspace}
             open={openFile}
           />
         </Show>

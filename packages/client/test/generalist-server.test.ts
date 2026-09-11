@@ -297,3 +297,34 @@ it.effect("authenticates every Generalist HTTP request through the credential ca
     }).pipe(Effect.ensuring(Effect.sync(fixture.dispose))),
   )
 })
+
+it.effect("signs the gateway-prefixed URL when the Generalist base has a path", () => {
+  const fixture = makeFixture()
+  const gateway = "/api/v2/threads/thread/runtime"
+  const stripping = HttpClient.make((request, url) =>
+    Effect.suspend(() => {
+      const stripped = new URL(url)
+      stripped.pathname = stripped.pathname.slice(gateway.length)
+      return fixture.transport.execute(HttpClientRequest.setUrl(request, stripped.toString()))
+    }),
+  )
+  return Effect.scoped(
+    Effect.gen(function* () {
+      const client = yield* makeGeneralistClient({
+        baseUrl: `http://client-v2-server${gateway}`,
+        auth: {
+          requestHeaders: ({ method, url }) =>
+            Effect.succeed({
+              authorization: "Bearer client-v2-token",
+              dpop: `proof-${method}-${url}`,
+            }),
+        },
+      }).pipe(Effect.provideService(HttpClient.HttpClient, stripping))
+      const snapshot = yield* client.sessions.snapshot({ sessionId: "session" })
+      expect(snapshot.session.id).toBe("session")
+      expect(fixture.seen[0]?.headers.dpop).toContain(
+        "proof-GET-http://client-v2-server/api/v2/threads/thread/runtime/sessions/session",
+      )
+    }).pipe(Effect.ensuring(Effect.sync(fixture.dispose))),
+  )
+})

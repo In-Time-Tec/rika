@@ -47,6 +47,9 @@ export interface ClientState {
   readonly mode: Mode
   readonly connection: "offline" | "connecting" | "connected" | "reconnecting" | "disconnected"
   readonly notice: string
+  readonly workspace: string
+  readonly branch?: string | undefined
+  readonly previews: Record<string, readonly TranscriptItem[]>
   readonly focusedSessionId?: string | undefined
 }
 export type ArchiveCompletion = () => void
@@ -54,6 +57,7 @@ export interface Client {
   readonly state: ClientState
   readonly loadScenario: (scenario: ScenarioId) => void
   readonly selectThread: (id: string) => void
+  readonly previewThread: (id: string) => void
   readonly newThread: (target?: "runner" | "orb") => void
   readonly archiveThread: (onArchived?: ArchiveCompletion) => void
   readonly archiveAndNewThread: (onCreated?: ArchiveCompletion) => void

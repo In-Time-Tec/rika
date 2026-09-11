@@ -70,6 +70,8 @@ it("does not claim an online Thread when the selection is empty or unknown", () 
     mode: "medium" as const,
     connection: "connected" as const,
     notice: "Connected",
+    workspace: "/workspace/rika",
+    previews: {},
   }
   for (const selectedThreadId of ["", "unknown-thread"]) {
     const state: ClientState = { ...base, selectedThreadId }
@@ -124,6 +126,8 @@ it("keeps terminal control characters in online API and Thread labels out of the
     mode: "medium",
     connection: "connected",
     notice: "Connected",
+    workspace: "/workspace/rika",
+    previews: {},
   }
   const plain = Bun.stripANSI(renderExitReceipt(captureOnlineExitReceipt(state, "/workspace/rika", "api\n\x1b[2J")))
   const api = plain.split("\n").find((line) => line.startsWith("API: "))

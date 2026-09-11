@@ -669,4 +669,80 @@ it.effect("loads an older history page through the public TUI client", () => {
     yield* client.dispose
   })
 })
+
+it.effect("previews a sibling Thread's transcript through the public TUI client", () => {
+  const previewSnapshot = {
+    ...snapshot,
+    session: { ...snapshot.session, id: "other-session", title: "Other Thread", activeRunId: undefined },
+    runs: [],
+    conversation: {
+      leafId: null,
+      entries: [{ id: "entry", parentId: null, messages: [{ role: "user", content: "preview prompt" }] }],
+    },
+  } as unknown as GeneralistSnapshot
+  const threads: ThreadMetadata[] = [
+    { id: "thread", title: "Current Thread", target: "runner", sessionId: "session" },
+    { id: "other", title: "Other Thread", target: "runner", sessionId: "other-session" },
+  ]
+  const snapshotCalls: string[] = []
+  const unused = () => Effect.die("Preview fixture does not mutate a Run")
+  const productClient: ProductClient = {
+    ...product(),
+    listThreads: () => Effect.succeed({ threads, nextCursor: null }),
+    thread: (id) => {
+      const thread = threads.find((candidate) => candidate.id === id)
+      return thread === undefined ? Effect.die("Unknown fixture Thread") : Effect.succeed(thread)
+    },
+    ensureSession: (threadId) =>
+      Effect.succeed({
+        sessionId: threads.find((candidate) => candidate.id === threadId)?.sessionId ?? "session",
+        created: false,
+      }),
+  }
+  const connection = {
+    snapshot,
+    events: Stream.empty,
+    status: Stream.succeed({ _tag: "Connected" as const, epoch: 0 }),
+    exhausted: Effect.never,
+    cancel: () => Effect.void,
+  }
+  const execution = {
+    raw: {},
+    snapshot: ({ sessionId }: { readonly sessionId: string }) =>
+      Effect.sync(() => {
+        snapshotCalls.push(sessionId)
+        return sessionId === "other-session" ? previewSnapshot : snapshot
+      }),
+    history: () => Effect.succeed({ leafId: null, entries: [], nextLeafId: null }),
+    family: ({ sessionId }: { readonly sessionId: string }) =>
+      Effect.succeed({ rootSessionId: sessionId, at: 0, sessions: [], nextBefore: null }),
+    submit: () => Effect.succeed({ id: "receipt", revision: 1 }),
+    updateInput: unused,
+    removeInput: unused,
+    steer: unused,
+    cancel: unused,
+    control: unused,
+    runs: () => Effect.succeed([]),
+    connect: () => Effect.succeed(connection),
+    subscribe: () => Stream.empty,
+  } as unknown as ExecutionClient
+  const client = createThreadClient({
+    product: productClient,
+    execution,
+    initialThreadId: "thread",
+    webSocketConstructor: () => ({}) as WebSocket,
+  })
+  return Effect.gen(function* () {
+    yield* waitForDetachedUntil(() => client.state.connection === "connected")
+    client.previewThread("other")
+    yield* waitForDetachedUntil(() => client.state.previews["other"] !== undefined)
+    const preview = client.state.previews["other"]
+    expect(preview?.some((item) => item.text === "preview prompt")).toBe(true)
+    expect(client.state.threads.find((thread) => thread.id === "other")?.items.length).toBeGreaterThan(0)
+    client.previewThread("other")
+    yield* waitForDetached(30)
+    expect(snapshotCalls.filter((sessionId) => sessionId === "other-session").length).toBe(1)
+    yield* client.dispose
+  })
+})
 import "./threads-startup.harness"

@@ -10,6 +10,9 @@ import type { DraftAttachment, DraftAttachments, Drafts } from "../types"
 const replaceLabels = (input: string, attachments: readonly DraftAttachment[]): string =>
   attachments.reduce((value, attachment) => value.replaceAll(attachment.label, attachment.token), input)
 
+const composerWorkspace = (workspace: Accessor<string>): string =>
+  workspace().length === 0 ? process.cwd() : workspace()
+
 export interface DraftController {
   readonly drafts: Accessor<Drafts>
   readonly setDrafts: Setter<Drafts>
@@ -21,7 +24,11 @@ export interface DraftController {
   readonly handlePaste: (event: Pick<PasteEvent, "bytes" | "metadata">, editor: TextareaRenderable) => boolean
 }
 
-const createDraftsImpl = (selectedId: Accessor<string>, editingId: Accessor<string | undefined>): DraftController => {
+const createDraftsImpl = (
+  selectedId: Accessor<string>,
+  editingId: Accessor<string | undefined>,
+  workspace: Accessor<string>,
+): DraftController => {
   const [drafts, setDrafts] = createSignal<Drafts>({})
   const [draftAttachments, setDraftAttachments] = createSignal<DraftAttachments>({})
   let lastPaste: { readonly text: string; readonly at: number } | undefined
@@ -68,7 +75,7 @@ const createDraftsImpl = (selectedId: Accessor<string>, editingId: Accessor<stri
     const id = selectedId(),
       attachments = draftAttachments()[id] ?? []
     const base: Model = {
-      ...initial("/workspace"),
+      ...initial(composerWorkspace(workspace)),
       input: replaceLabels(editor.plainText, attachments),
       cursor: replaceLabels(editor.plainText.slice(0, editor.cursorOffset), attachments).length,
       pastedText: attachments,
@@ -110,6 +117,6 @@ const createDraftsImpl = (selectedId: Accessor<string>, editingId: Accessor<stri
   return { drafts, setDrafts, draftAttachments, setAttachmentsFor, updateDraft, expandDraft, imagesFor, handlePaste }
 }
 export const createDrafts: {
-  (editingId: Accessor<string | undefined>): (selectedId: Accessor<string>) => DraftController
-  (selectedId: Accessor<string>, editingId: Accessor<string | undefined>): DraftController
-} = Function.dual(2, createDraftsImpl)
+  (editingId: Accessor<string | undefined>, workspace: Accessor<string>): (selectedId: Accessor<string>) => DraftController
+  (selectedId: Accessor<string>, editingId: Accessor<string | undefined>, workspace: Accessor<string>): DraftController
+} = Function.dual(3, createDraftsImpl)

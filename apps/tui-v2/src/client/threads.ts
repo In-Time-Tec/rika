@@ -13,7 +13,7 @@ import {
 } from "@rika/client/thread"
 import type { WorkspaceSeedClient } from "@rika/client/workspace-seeds"
 import { createArchive, encodeArchive } from "@rika/workspace-input/archive"
-import type { ArchiveCompletion, Client, ClientState, Mode, ScenarioId, ThreadView } from "./model"
+import type { ArchiveCompletion, Client, ClientState, Mode, ScenarioId, ThreadView, TranscriptItem } from "./model"
 import type { StoreState, StoreThread } from "./state"
 import type { ProductClient } from "@rika/client/product"
 
@@ -36,25 +36,32 @@ export type CreateThreadClientOptions = Omit<
     readonly creation?: ThreadCreationOptions
     readonly workspaceSeeds?: Pick<WorkspaceSeedClient, "stage">
     readonly workspace?: string
+    readonly branch?: string
     readonly initialPrompt?: string
   }
 
-const initialState = (): StoreState => ({
+const initialState = (workspace: string, branch: string | undefined): StoreState => ({
   scenario: "conversation",
   selectedThreadId: "",
   threads: [],
   mode: "medium",
   connection: "reconnecting",
   notice: "Connecting to Rika…",
+  workspace,
+  branch,
+  previews: {},
   focusedSessionId: undefined,
 })
 
-const toThread = (thread: ReturnType<typeof makeThreadClient>["state"]["threads"][number]): StoreThread => ({
+const toThread = (
+  thread: ReturnType<typeof makeThreadClient>["state"]["threads"][number],
+  previews: Readonly<Record<string, readonly TranscriptItem[]>>,
+): StoreThread => ({
   id: thread.id,
   title: thread.title,
   target: thread.target,
   activity: thread.activity,
-  items: [...thread.items],
+  items: thread.items.length > 0 ? [...thread.items] : [...(previews[thread.id] ?? [])],
   pending: thread.pending.map((pending) => ({
     id: pending.id,
     prompt: pending.prompt,
@@ -82,7 +89,7 @@ const clientRuntimeLayer = BunChildProcessSpawner.layer.pipe(
 )
 
 export const createThreadClient = (options: CreateThreadClientOptions): Client => {
-  const [state, setState] = createStore<StoreState>(initialState())
+  const [state, setState] = createStore<StoreState>(initialState(options.workspace ?? "", options.branch))
   const runtime = ManagedRuntime.make(clientRuntimeLayer)
   let creating = false
   let archiving = false
@@ -109,13 +116,14 @@ export const createThreadClient = (options: CreateThreadClientOptions): Client =
       : { ...threadOptions, executionForThread },
   )
   const sync = (value = threadClient.state): void => {
-    const threads = value.threads.map(toThread)
+    const threads = value.threads.map((thread) => toThread(thread, value.previews))
     const selected = value.selectedThreadId ?? threads[0]?.id ?? ""
     setState({
       selectedThreadId: selected,
       threads,
       connection: connectionFor(value.connection),
       notice: value.notice,
+      previews: Object.fromEntries(Object.entries(value.previews).map(([id, items]) => [id, [...items]])),
       focusedSessionId: value.focusedSessionId,
     })
   }
@@ -289,6 +297,7 @@ export const createThreadClient = (options: CreateThreadClientOptions): Client =
       navigationRevision += 1
       run(threadClient.selectThread(threadId))
     },
+    previewThread: (threadId) => run(threadClient.previewThread(threadId).pipe(Effect.ignore)),
     newThread: (target = "runner") => run(createThread(target)),
     archiveThread: (onArchived) => {
       const current = selected()

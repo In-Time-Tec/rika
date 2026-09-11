@@ -12,6 +12,8 @@ export interface ComposerProps {
   readonly mode: Accessor<Mode>
   readonly focused: boolean
   readonly threadId: Accessor<string>
+  readonly notice: Accessor<string>
+  readonly workspace: Accessor<string>
   readonly drafts: Accessor<Drafts>
   readonly updateDraft: (id: string, value: string) => void
   readonly setFocus: (focus: FocusPanel) => void
@@ -26,6 +28,7 @@ export interface ComposerProps {
 
 export function Composer(props: ComposerProps) {
   const dimensions = useTerminalDimensions()
+  const workspaceLabel = () => props.workspace()
   let editor: TextareaRenderable | undefined
   const submit = () => {
     const value = editor?.plainText ?? ""
@@ -141,7 +144,20 @@ export function Composer(props: ComposerProps) {
         }}
         onSubmit={submit}
       />
-      <Show when={dimensions().width >= 60}>
+      <Show when={props.notice().length > 0}>
+        <text
+          position="absolute"
+          left={2}
+          bottom={-1}
+          height={1}
+          width={Math.max(8, dimensions().width - workspaceLabel().length - 6)}
+          truncate
+          fg={colors.amber}
+          bg={colors.surface}
+          content={` ${props.notice()} `}
+        />
+      </Show>
+      <Show when={dimensions().width >= 60 && workspaceLabel().length > 0}>
         <text
           position="absolute"
           right={2}
@@ -149,7 +165,7 @@ export function Composer(props: ComposerProps) {
           height={1}
           fg={colors.muted}
           bg={colors.surface}
-          content=" /workspace (main) "
+          content={` ${workspaceLabel()} `}
         />
       </Show>
     </box>

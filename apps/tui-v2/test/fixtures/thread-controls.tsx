@@ -25,6 +25,8 @@ const state: ClientState = {
   mode: "medium",
   connection: "reconnecting",
   notice: "Reconnecting to Rika…",
+  workspace: "/workspace",
+  previews: {},
 }
 
 const flow = Effect.scoped(
@@ -38,6 +40,7 @@ const flow = Effect.scoped(
       },
       loadScenario: () => {},
       selectThread: () => {},
+      previewThread: () => {},
       newThread: () => {},
       archiveThread: () => {},
       archiveAndNewThread: () => {},

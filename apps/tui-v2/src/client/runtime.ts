@@ -9,6 +9,8 @@ import { imageItem } from "./images"
 export interface CreateClientOptions {
   readonly scenario?: ScenarioId
   readonly delayMs?: number
+  readonly workspace?: string
+  readonly branch?: string
 }
 type PlaybackFiber = Fiber.Fiber<void, never>
 type ActiveRun = {
@@ -28,6 +30,8 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
   const initialScenario = options.scenario ?? "welcome"
   const fixture = getScenarioFixture(initialScenario)
   const initialState = stateFromFixture(fixture)
+  if (options.workspace !== undefined) initialState.workspace = options.workspace
+  if (options.branch !== undefined) initialState.branch = options.branch
   const [state, setStoreState] = createStore<StoreState>(initialState)
   const runtime = ManagedRuntime.make(Layer.empty)
   const activeRuns = new Map<string, ActiveRun>()
@@ -38,16 +42,10 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
   let scenarioGeneration = 0
   const delayMs =
     options.delayMs === undefined || !Number.isFinite(options.delayMs) ? defaultDelayMs : Math.max(0, options.delayMs)
-  const nextId = (prefix: string): string => {
-    sequence += 1
-    return `${prefix}-${sequence}`
-  }
+  const nextId = (prefix: string): string => `${prefix}-${++sequence}`
   const threadIndex = (threadId: string): number => state.threads.findIndex((thread) => thread.id === threadId)
-  const itemIndex = (threadId: string, itemId: string): number => {
-    const index = threadIndex(threadId)
-    if (index < 0) return -1
-    return state.threads[index]?.items.findIndex((item) => item.id === itemId) ?? -1
-  }
+  const itemIndex = (threadId: string, itemId: string): number =>
+    state.threads[threadIndex(threadId)]?.items.findIndex((item) => item.id === itemId) ?? -1
   const setActivity = (threadId: string, activity: Activity): void => {
     const index = threadIndex(threadId)
     if (index >= 0) setStoreState("threads", index, "activity", activity)
@@ -458,6 +456,7 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     state,
     loadScenario,
     selectThread,
+    previewThread: () => {},
     newThread,
     archiveThread: (onArchived) => {
       if (disposed) return

@@ -19,6 +19,7 @@ import {
   applyConnectionStatus,
   projectSnapshot,
   type FamilyProjection,
+  type ProjectionItem,
   type ProjectionResult,
   type ProjectionState,
   type ProjectionThread,
@@ -54,6 +55,7 @@ export interface ThreadClientState {
   readonly selectedSessionId: string | undefined
   readonly focusedSessionId: string | undefined
   readonly threads: readonly ProjectionThread[]
+  readonly previews: Readonly<Record<string, readonly ProjectionItem[]>>
   readonly projection: ProjectionState | undefined
   readonly connection: "connecting" | "connected" | "reconnecting" | "disconnected"
   readonly notice: string
@@ -68,6 +70,7 @@ export interface ThreadClient {
   readonly subscribe: (listener: (state: ThreadClientState) => void) => () => void
   readonly refreshThreads: () => Effect.Effect<void, ThreadClientError>
   readonly selectThread: (threadId: string) => Effect.Effect<void, ThreadClientError>
+  readonly previewThread: (threadId: string) => Effect.Effect<void, ThreadClientError>
   readonly submit: (prompt: string, commandId?: string) => Effect.Effect<CommandReceipt, ThreadClientError>
   readonly editQueued: (
     id: string,
@@ -142,6 +145,7 @@ const initialState: ThreadClientState = {
   selectedSessionId: undefined,
   focusedSessionId: undefined,
   threads: [],
+  previews: {},
   projection: undefined,
   connection: "disconnected",
   notice: "",
@@ -338,6 +342,8 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     string,
     { readonly execution: ExecutionClient; readonly projection: ProjectionState }
   >()
+  const catalogThreads = new Map<string, ThreadMetadata>()
+  const previewInFlight = new Set<string>()
   let refreshFamily: (
     selected: ExecutionClient,
     rootSessionId: string,
@@ -530,6 +536,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       .listThreads({ scope: options.catalogScope })
       .pipe(Effect.mapError((error) => mapError("threads.list", error)))
     if (disposed || revision !== threadRefreshRevision) return
+    for (const thread of page.threads) catalogThreads.set(thread.id, thread)
     const existing = new Map(current.threads.map((thread) => [thread.id, thread]))
     const threads = page.threads.map((thread) => {
       const retained = existing.get(thread.id)
@@ -600,6 +607,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
       .thread(threadId)
       .pipe(Effect.mapError((error) => mapError("thread.read", error)))
     if (disposed || epoch !== current.selectionEpoch) return
+    catalogThreads.set(threadId, metadata)
     const executionForSelection = yield* executionFor(metadata)
     if (disposed || epoch !== current.selectionEpoch) return
     const session = yield* options.product
@@ -627,6 +635,33 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     updateProjection(projection)
     publish({ ...current, connection: "connecting", notice: "", focusedSessionId: undefined })
     yield* connectForSelection(executionForSelection, session.sessionId, epoch)
+  })
+  const previewThread = Effect.fn("RikaClientV2.previewThread")(function* (threadId: string) {
+    if (disposed || previewInFlight.has(threadId) || current.previews[threadId] !== undefined) return
+    if (current.projection?.thread.id === threadId) return
+    const metadata = catalogThreads.get(threadId)
+    const sessionId = metadata?.sessionId
+    if (metadata === undefined || sessionId === undefined) return
+    previewInFlight.add(threadId)
+    const cached = sessionProjections.get(sessionId)
+    if (cached !== undefined) {
+      previewInFlight.delete(threadId)
+      publish({ ...current, previews: { ...current.previews, [threadId]: cached.projection.thread.items } })
+      return
+    }
+    yield* Effect.gen(function* () {
+      const execution = yield* executionFor(metadata)
+      const snapshot = yield* execution.snapshot({ sessionId }).pipe(
+        Effect.mapError((error) => mapError("session.snapshot", error)),
+      )
+      const projection = projectSnapshot({
+        sessionId,
+        threadId,
+        snapshot,
+        target: options.targetForThread?.(metadata) ?? metadata.target,
+      })
+      publish({ ...current, previews: { ...current.previews, [threadId]: projection.thread.items } })
+    }).pipe(Effect.ensuring(Effect.sync(() => previewInFlight.delete(threadId))))
   })
   const submit = Effect.fn("RikaClientV2.submit")(function* (prompt: string, provided?: string) {
     const selected = selection()
@@ -946,6 +981,7 @@ export const makeThreadClient = (options: MakeThreadClientOptions): ThreadClient
     },
     refreshThreads,
     selectThread,
+    previewThread,
     submit,
     editQueued,
     removeQueued,
