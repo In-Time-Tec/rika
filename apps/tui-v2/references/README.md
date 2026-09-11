@@ -24,7 +24,7 @@ colors; the application background is `#282c34`, not the raw profile-encoded PNG
 
 [exit-receipt.png](exit-receipt.png) also defines the compact orb, title, workspace,
 and relaunch line printed after returning to the shell. V2 prints a truthful
-offline-scenario relaunch instead of a nonfunctional hosted continuation command.
+offline-scenario relaunch instead of a nonfunctional Thread continuation command.
 
 Run `bun run tui-v2 --no-animate` in a true-color terminal. Use a 216-column,
 62-row viewport for the reference-scale layout. `--no-animate` holds the orb at
@@ -37,7 +37,7 @@ The exit banner accepts `Ctrl+N` to archive the current offline thread and start
 another, `Ctrl+E` to archive and quit, and another `Ctrl+C` to quit.
 
 V2 remains an offline demonstration: file lists, model routes, usage, and transcript
-content are fixtures, not reads from the user's workspace or a hosted session.
+content are fixtures, not reads from the user's workspace or a live Thread.
 The workspace footer is a fixture too. Archiving only changes the in-memory demo.
 The reference shortcut legend includes production features such as prompt history
 and `$EDITOR` integration that the standalone demo does not implement.

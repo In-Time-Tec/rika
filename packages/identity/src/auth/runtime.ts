@@ -16,6 +16,7 @@ export interface IdentityPrincipal {
   readonly userId: string
   readonly clientId?: string
   readonly dpopJkt?: string
+  readonly expiresAt?: number
 }
 
 export interface IdentityRuntime {
@@ -38,6 +39,7 @@ export class IdentityRuntimeService extends Context.Service<IdentityRuntimeServi
 
 const AccessTokenPayload = Schema.Struct({
   sub: Schema.NonEmptyString,
+  exp: Schema.Int.check(Schema.isGreaterThan(0)),
   client_id: Schema.optionalKey(Schema.String),
   cnf: Schema.optionalKey(Schema.Struct({ jkt: Schema.optionalKey(Schema.String) })),
 })
@@ -251,12 +253,10 @@ export const makeBetterAuthIdentityRuntime = (input: {
         }).pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(AccessTokenPayload)),
           Effect.map((payload) => {
-            if (payload.client_id !== undefined && payload.cnf?.jkt !== undefined) {
-              return { userId: payload.sub, clientId: payload.client_id, dpopJkt: payload.cnf.jkt }
-            }
-            if (payload.client_id !== undefined) return { userId: payload.sub, clientId: payload.client_id }
-            if (payload.cnf?.jkt !== undefined) return { userId: payload.sub, dpopJkt: payload.cnf.jkt }
-            return { userId: payload.sub }
+            const principal: IdentityPrincipal = { userId: payload.sub, expiresAt: payload.exp * 1_000 }
+            if (payload.client_id !== undefined) Object.assign(principal, { clientId: payload.client_id })
+            if (payload.cnf?.jkt !== undefined) Object.assign(principal, { dpopJkt: payload.cnf.jkt })
+            return principal
           }),
           Effect.tapError((cause) => Effect.logWarning("identity.access_token.rejected", cause.message)),
           Effect.mapError(() => IdentityRuntimeError.make({ kind: "invalid" })),

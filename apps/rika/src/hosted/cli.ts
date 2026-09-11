@@ -1,4 +1,3 @@
-import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import * as ProductOperation from "@rika/product/product-operation"
 import { Crypto, Effect, FileSystem, Layer } from "effect"
@@ -6,17 +5,15 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import type { Input } from "../command/root/hosted"
 import * as HostedAccount from "./account"
 import * as HostedBrowser from "./browser"
-import { Browser, CredentialStore, HostedError, Http, ProfileStore, ThreadClient } from "./contract"
+import { Browser, CredentialStore, HostedError, Http, ProfileStore } from "./contract"
 import * as HostedCredentialStore from "./credential-store"
 import * as HostedHttp from "./http"
 import * as HostedProfileStore from "./profile-store"
-import * as HostedThreadClient from "./thread-client"
 import * as OpenAiProviderAuth from "../provider/openai/auth"
 
 export const liveLayer = (home: string) =>
   Layer.mergeAll(
     HostedHttp.layer,
-    HostedThreadClient.layer.pipe(Layer.provide(BunSocket.layerWebSocketConstructor)),
     HostedProfileStore.layer({ home }),
     HostedCredentialStore.layer({
       filename: `${home}/.config/rika/hosted-credential.json`,
@@ -79,21 +76,6 @@ const secretOperation = (input: Extract<Input, { readonly _tag: "Secret" }>) =>
       )
     : HostedAccount.revokeSecret(input.name, input.scope)
 
-const recoveryOperation = (input: Extract<Input, { readonly _tag: "ThreadRecovery" }>) => {
-  if (input.action === "inspect") return HostedAccount.inspectRecovery(input.threadId, input.runId)
-  if (input.action === "retry")
-    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, { action: "retry" })
-  if (input.action === "accept")
-    return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
-      action: "accept",
-      value: input.value,
-    })
-  return HostedAccount.resolveRecovery(input.threadId, input.runId, input.operationId, {
-    action: "abort",
-    reason: input.reason,
-  })
-}
-
 const operation = (
   input: Input,
 ): Effect.Effect<
@@ -107,23 +89,14 @@ const operation = (
   | Http
   | OpenAiAuth.Service
   | ProfileStore
-  | ThreadClient
 > => {
   if (input._tag === "Auth") return authOperation(input)
   if (input._tag === "Organization") return organizationOperation(input)
   if (input._tag === "Project") return projectOperation(input)
-  if (input._tag === "RemoteRun") return HostedAccount.runThread(input.threadId, input.request)
   if (input._tag === "Credential") return credentialOperation(input)
   if (input._tag === "Provider") return providerOperation(input)
   if (input._tag === "Secret") return secretOperation(input)
-  if (input._tag === "ThreadService") {
-    if (input.action === "ensure") return HostedAccount.ensureRepositoryService(input.threadId, input.service)
-    return HostedAccount.stopRepositoryService(input.threadId, input.serviceId)
-  }
-  if (input._tag === "ThreadPortal") return HostedAccount.openThreadPortal(input.threadId, input.port)
-  if (input._tag === "ThreadRecovery") return recoveryOperation(input)
-  if (input._tag === "ThreadSync") return HostedAccount.syncRepository(input)
-  return HostedAccount.createRemoteThread()
+  return Effect.fail(HostedError.make({ kind: "protocol", message: `${input._tag} requires the V2 client` }))
 }
 
 export const run = Effect.fn("HostedCli.run")(function* (input: Input) {

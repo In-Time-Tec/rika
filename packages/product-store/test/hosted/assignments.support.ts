@@ -1,4 +1,3 @@
-import { clientLayer } from "@rika/execution/postgres"
 import { expect } from "@effect/vitest"
 
 import * as BunServices from "@effect/platform-bun/BunServices"
@@ -27,6 +26,7 @@ import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres"
 import { Config, Effect, FileSystem, Layer, Random, Redacted } from "effect"
 import { fileURLToPath } from "node:url"
 import { Pool } from "pg"
+import { clientLayer } from "../../src/database/postgres"
 import { identityMigrations } from "../../../identity/src/database/migrations"
 import { runMigration } from "../../../identity/src/database/postgres"
 import * as schema from "../../src/database/schema/product"

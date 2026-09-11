@@ -1,39 +1,29 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "@rika/execution",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/engine/runtime.ts",
-    "./route": "./src/routing/route.ts",
-    "./local-tools": "./src/tool/local.ts",
-    "./local-runtime": "./src/tool/runtime.ts",
-    "./mcp-tools": "./src/tool/mcp.ts",
-    "./remote-tools": "./src/remote-tools.ts",
-    "./postgres": "./src/postgres.ts",
-    "./scripted-model": "./src/scripted-model.ts",
-    "./test-harness": "./src/test-harness.ts",
-    "./terminal-unknown": "./src/routing/terminal-unknown.ts"
+    ".": "./src/index.ts",
+    "./binding": "./src/binding.ts",
+    "./component": "./src/component.ts",
+    "./executor": "./src/executor.ts",
+    "./operation": "./src/operation.ts",
+    "./tools": "./src/tools.ts",
+    "./transport": "./src/transport.ts"
   },
   "dependencies": {
-    "@effect/sql-pg": "catalog:",
-    "@effect/platform-bun": "catalog:",
-    "@aws-sdk/client-bedrock-runtime": "catalog:",
-    "@aws-sdk/credential-provider-node": "catalog:",
-    "@rika/extensions": "workspace:*",
     "@rika/product": "workspace:*",
-    "effect": "catalog:",
-    "generalist": "catalog:",
-    "pg": "catalog:",
-    "pg-cursor": "catalog:"
+    "effect": "4.0.0-rc.112",
+    "generalist": "catalog:"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
-    "@rika/configuration": "workspace:*",
-    "@types/bun": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
+    "@effect/vitest": "4.0.0-rc.112",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
   },
   "rika": {
     "kind": "adapter",

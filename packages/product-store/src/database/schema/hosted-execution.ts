@@ -192,6 +192,9 @@ export const rikaHostedWorkspaceSeeds = pgTable(
   "rika_hosted_workspace_seeds",
   {
     id: text().primaryKey(),
+    ownerId: text("owner_id").references(() => SchemaReference.column("rikaHostedOwners", "id"), {
+      onDelete: "cascade",
+    }),
     createdByUserId: text("created_by_user_id").notNull(),
     createdByDeviceId: text("created_by_device_id").notNull(),
     createdByClientId: text("created_by_client_id").notNull(),

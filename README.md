@@ -1,6 +1,6 @@
 # Rika
 
-Rika is a collaborative coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives client and executor restarts. Local execution remains the default, while an explicitly remote Thread runs in an isolated E2B workspace. Hosted identity, access, Threads, and Generalist execution authority live in PostgreSQL.
+Rika is a collaborative coding-agent CLI and terminal application. Every Turn runs as a durable execution that survives client and executor restarts. Local execution remains the default, while an explicitly remote Thread runs in an isolated Box workspace. Hosted identity, access, Threads, and product state live in PostgreSQL; Generalist execution authority lives in the runtime object store.
 
 ## Install
 
@@ -43,11 +43,11 @@ bun run dev
 The standard repository commands are `build`, `check`, `dev`, `format`, `test`, and `typecheck`.
 See [the script map](scripts/README.md) for what each development and packaging helper does.
 
-### Offline TUI v2
+### Offline TUI scenarios
 
-`apps/tui-v2` is a standalone Solid/OpenTUI application using Effect V4 and Effect/CLI. It runs deterministic
-offline scenarios without authentication, hosted services, model calls, or workspace execution. It does not
-replace the production `rika` CLI.
+`apps/tui-v2` is the connected Solid/OpenTUI interface embedded in the production `rika` CLI, built with Effect V4
+and Effect/CLI. It also runs standalone deterministic offline scenarios without authentication, hosted services,
+model calls, or workspace execution — useful for rendering and interaction checks.
 
 ```bash
 bun run tui-v2
@@ -76,9 +76,9 @@ Files, images, and Threads are offline fixtures; no workspace files are read or 
 ### Personal Railway stack
 
 `bun run dev:remote` deploys the current Docker worktree to an isolated `rika-dev-*` Railway project. Alchemy
-creates private API and web services, private PostgreSQL 17, a Storage Bucket, and the only public service, Caddy.
-The service processes use production configuration. Set the external GitHub OAuth, GitHub App, Resend, E2B API
-key, and E2B template identity values from `.env.example` before deploying. Set `RAILWAY_WORKSPACE_ID` in the command process so the project cannot land in another workspace. Authenticate
+creates private API and web services, private PostgreSQL 17, a runtime-storage Bucket, and the only public service, Caddy.
+The service processes use production configuration. Set the external GitHub OAuth, GitHub App, Resend, Rivet,
+model, and Box provider/template values from `.env.example` before deploying. Set `RAILWAY_WORKSPACE_ID` in the command process so the project cannot land in another workspace. Authenticate
 Alchemy's Railway provider with an Alchemy profile or inject `RAILWAY_API_TOKEN` into the command process. Do not
 store that provisioning token in `.env`.
 

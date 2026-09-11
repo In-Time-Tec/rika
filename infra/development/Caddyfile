@@ -6,19 +6,6 @@
 http://:{$PUBLIC_PORT} {
 	bind 127.0.0.1
 
-	@api path /api/* /healthz /readyz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
-	handle @api {
-		reverse_proxy 127.0.0.1:{$API_PORT}
-	}
-
-	handle {
-		reverse_proxy 127.0.0.1:{$WEB_PORT}
-	}
-}
-
-http://:{$EXECUTOR_PORT} {
-	bind 127.0.0.1
-
 	@ready {
 		path /.rika-ready
 		header X-Rika-Readiness {$READINESS_TOKEN:unconfigured}
@@ -27,12 +14,12 @@ http://:{$EXECUTOR_PORT} {
 		respond "{$READINESS_TOKEN:unconfigured}" 200
 	}
 
-	@executor path /api/v1/executors
-	handle @executor {
+	@api path /api/* /healthz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
+	handle @api {
 		reverse_proxy 127.0.0.1:{$API_PORT}
 	}
 
 	handle {
-		respond "Not found" 404
+		reverse_proxy 127.0.0.1:{$WEB_PORT}
 	}
 }

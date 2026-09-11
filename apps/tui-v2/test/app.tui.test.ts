@@ -25,7 +25,7 @@ test("Ctrl+C opens a capturable exit banner after dismissing the Thread switcher
     ),
   ))
 
-test("hosted reconnect banner and keyboard stop/cancel controls render and dispatch", () =>
+test("Thread reconnect banner and keyboard stop/cancel controls render and dispatch", () =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -33,7 +33,7 @@ test("hosted reconnect banner and keyboard stop/cancel controls render and dispa
         yield* Effect.gen(function* () {
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
           const child = yield* spawner.spawn(
-            ChildProcess.make("bun", ["--preload", "@opentui/solid/preload", "test/fixtures/hosted-controls.tsx"], {
+            ChildProcess.make("bun", ["--preload", "@opentui/solid/preload", "test/fixtures/thread-controls.tsx"], {
               cwd: fileURLToPath(new URL("..", import.meta.url)),
               stdin: "ignore",
               stdout: "ignore",

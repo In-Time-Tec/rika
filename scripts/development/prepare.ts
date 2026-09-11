@@ -77,7 +77,7 @@ const initializeBucket = (client: S3Client, bucket: string) => {
 const program = Effect.gen(function* () {
   const databaseUrl = yield* Config.string("DATABASE_URL")
   const endpoint = yield* Config.url("RIKA_DEV_OBJECT_STORE_URL")
-  const bucket = yield* Config.string("RIKA_WORKSPACE_CHECKPOINT_BUCKET")
+  const bucket = yield* Config.string("RIKA_RUNTIME_STORAGE_BUCKET")
   const region = yield* Config.string("AWS_REGION")
   const http = yield* HttpClient.HttpClient
 

@@ -1,4 +1,4 @@
-/* oxlint-disable complexity -- keyboard paging keeps local virtualization and hosted history in one boundary. */
+/* oxlint-disable complexity -- keyboard paging keeps local virtualization and remote history in one boundary. */
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { CliRenderEvents, type KeyEvent, type ScrollBoxRenderable } from "@opentui/core"
 import { Effect, Schedule } from "effect"

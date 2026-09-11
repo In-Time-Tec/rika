@@ -1,8 +1,0 @@
-import "./interactive-session/connection.fixture"
-import "./interactive-session/history.fixture"
-import "./interactive-session/catalog-refresh.fixture"
-import "./interactive-session/mutation-retry.fixture"
-import "./interactive-session/protocol-ordering.fixture"
-import "./interactive-session/reconnect-policy.fixture"
-import "./interactive-session/submission-cancellation.fixture"
-import "./interactive-session/thread-selection.fixture"

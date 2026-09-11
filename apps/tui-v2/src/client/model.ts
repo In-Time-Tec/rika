@@ -49,12 +49,14 @@ export interface ClientState {
   readonly notice: string
   readonly focusedSessionId?: string | undefined
 }
+export type ArchiveCompletion = () => void
 export interface Client {
   readonly state: ClientState
   readonly loadScenario: (scenario: ScenarioId) => void
   readonly selectThread: (id: string) => void
   readonly newThread: (target?: "runner" | "orb") => void
-  readonly archiveThread: () => void
+  readonly archiveThread: (onArchived?: ArchiveCompletion) => void
+  readonly archiveAndNewThread: (onCreated?: ArchiveCompletion) => void
   readonly submit: (prompt: string, images?: readonly ImageAttachment[]) => void
   readonly cancel: () => void
   readonly stop: () => void

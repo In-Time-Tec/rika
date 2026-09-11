@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/client",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generalist": "./src/generalist.ts",
+    "./credentials": "./src/credentials.ts",
+    "./product": "./src/product.ts",
+    "./thread": "./src/thread.ts",
+    "./projection": "./src/projection.ts",
+    "./runner": "./src/runner.ts",
+    "./workspace-seeds": "./src/workspace-seeds.ts"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/client/src packages/client/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "@rika/execution": "workspace:*",
+    "@rika/product": "workspace:*",
+    "@rika/workspace-input": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "generalist": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "client"
+  }
+}

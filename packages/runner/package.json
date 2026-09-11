@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./daemon": "./src/daemon.ts",
+    "./box/daemon": "./src/box/daemon.ts",
+    "./box/main": "./src/box/main.ts",
+    "./executor": "./src/executor.ts",
+    "./search": "./src/search.ts",
+    "./tools": "./src/tools.ts",
+    "./transport": "./src/transport.ts",
+    "./workspace": "./src/workspace.ts"
+  },
+  "dependencies": {
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@rika/box-executor": "workspace:*",
+    "@rika/client": "workspace:*",
+    "@rika/context": "workspace:*",
+    "@rika/execution": "workspace:*",
+    "@rika/product": "workspace:*",
+    "@rika/workspace-input": "workspace:*",
+    "effect": "4.0.0-rc.112",
+    "generalist": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "execution"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/runner/src packages/runner/test",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}

@@ -227,4 +227,14 @@ export const migrations: ReadonlyArray<Migration> = [
     checksum: "54a9c8d279c705903271c58a298eae7efe71261eb1551e74debeb8912a290fca",
     url: new URL("../../migrations/postgres/0044-process-observations.sql", import.meta.url),
   },
+  {
+    id: "product/0045_box_assignment_bindings",
+    checksum: "8fdcf89b9ca920a45c9714ae0f1406e243e644a310c1ccf826e3c626bd722485",
+    url: new URL("../../migrations/postgres/0045-box-assignment-bindings.sql", import.meta.url),
+  },
+  {
+    id: "product/0046_workspace_seed_owner_authority",
+    checksum: "aaa2c44560d41493f4b8fd5b84374d2ba214fdc139c0cf75250ba37d3b0368f3",
+    url: new URL("../../migrations/postgres/0046-workspace-seed-owner-authority.sql", import.meta.url),
+  },
 ]

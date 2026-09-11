@@ -23,14 +23,14 @@ Alchemy also starts the web server and proxy.
 
 These are internal helpers, not extra setup commands:
 
-| File                                 | Why it exists                                                                                                   |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `development/prepare.ts`             | Waits for PostgreSQL and MinIO, then creates the checkpoint bucket if missing.                                  |
-| `development/api.ts`                 | Runs the API; when local Orb development is configured, verifies the E2B template and owns its executor tunnel. |
-| `development/caddy.ts`               | Runs the local proxy and announces readiness only after checking this process's identity.                       |
-| `development/secret-service.ts`      | Linux-only D-Bus/keyring service for Amp orbs, started by `.amp/services.yaml`. Not needed on macOS.            |
-| `development/owned-child-process.ts` | Shared shutdown cleanup so interrupted helpers do not leave child processes running.                            |
-| `development/railway.ts`             | Personal Railway deploy/destroy only. Guards the target and preserves state for retries.                        |
+| File                                 | Why it exists                                                                                        |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `development/prepare.ts`             | Waits for PostgreSQL and MinIO, then creates the runtime storage bucket if missing.                  |
+| `development/api.ts`                 | Runs the promoted `apps/api` start command as an owned child process.                                |
+| `development/caddy.ts`               | Runs the local proxy and announces readiness only after checking this process's identity.            |
+| `development/secret-service.ts`      | Linux-only D-Bus/keyring service for Amp orbs, started by `.amp/services.yaml`. Not needed on macOS. |
+| `development/owned-child-process.ts` | Shared shutdown cleanup so interrupted helpers do not leave child processes running.                 |
+| `development/railway.ts`             | Personal Railway deploy/destroy only. Guards the target and preserves state for retries.             |
 
 Railway commands create or delete live resources. See [setup](../README.md#personal-railway-stack) for credentials.
 Never delete `.alchemy` while resources may remain; it holds the identity and cleanup state.
@@ -40,6 +40,7 @@ Never delete `.alchemy` while resources may remain; it holds the identity and cl
 | File                            | Why it exists                                                                                      |
 | ------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `packaging/package-target.ts`   | Compiles one target, or aggregates release checksums and evidence.                                 |
+| `packaging/box-executor.ts`     | Compiles the Box executor artifact into `artifacts/box-executor` for out-of-band template builds.  |
 | `packaging/npm-package.ts`      | Internal helper called by aggregation to assemble the npm launcher and platform packages.          |
 | `packaging/package-contract.ts` | Shared target names and archive inventory used by builds, tests, and CI. Not an executable script. |
 

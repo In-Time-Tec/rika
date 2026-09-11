@@ -6,7 +6,9 @@
   "type": "module",
   "exports": {
     "./database-schema": "./src/database/schema/product.ts",
+    "./postgres": "./src/database/postgres.ts",
     "./assignments": "./src/hosted/assignment-store/assignments.ts",
+    "./box-assignments": "./src/hosted/assignment-store/box.ts",
     "./client-authority": "./src/hosted/client-authority.ts",
     "./thread-event-store": "./src/hosted/thread-event-store.ts",
     "./environment-store": "./src/hosted/environment-store.ts",
@@ -63,7 +65,9 @@
     "./migrations/postgres/0041-native-tool-runner-registration.sql": "./migrations/postgres/0041-native-tool-runner-registration.sql",
     "./migrations/postgres/0042-runner-assignment-poll-index.sql": "./migrations/postgres/0042-runner-assignment-poll-index.sql",
     "./migrations/postgres/0043-drop-unused-hosted-tables.sql": "./migrations/postgres/0043-drop-unused-hosted-tables.sql",
-    "./migrations/postgres/0044-process-observations.sql": "./migrations/postgres/0044-process-observations.sql"
+    "./migrations/postgres/0044-process-observations.sql": "./migrations/postgres/0044-process-observations.sql",
+    "./migrations/postgres/0045-box-assignment-bindings.sql": "./migrations/postgres/0045-box-assignment-bindings.sql",
+    "./migrations/postgres/0046-workspace-seed-owner-authority.sql": "./migrations/postgres/0046-workspace-seed-owner-authority.sql"
   },
   "dependencies": {
     "@effect/sql-pg": "catalog:",
@@ -73,7 +77,7 @@
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "pg": "catalog:",
-    "@rika/execution": "workspace:*"
+    "pg-cursor": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",
@@ -82,6 +86,7 @@
     "@rika/extensions": "workspace:*",
     "@types/bun": "catalog:",
     "@types/pg": "catalog:",
+    "@types/pg-cursor": "2.7.2",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },

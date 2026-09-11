@@ -1,13 +1,9 @@
-import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import "./account/authenticated.fixture"
 import "./account/login.fixture"
-import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, FileSystem, Layer, Option, Redacted, Ref, Schema } from "effect"
+import { Effect, Layer, Option, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { ClientTicketResponse } from "@rika/product/client-protocol"
 import {
-  createRemoteThread,
   getOpenAiAccount,
   listOrganizations,
   putOpenAiAccount,
@@ -15,14 +11,7 @@ import {
   useOrganization,
   usePersonalOwner,
 } from "../../src/hosted/account"
-import {
-  CredentialStore,
-  HostedThreadId,
-  Http,
-  ProfileStore,
-  ThreadClient,
-  type Profile,
-} from "../../src/hosted/contract"
+import { CredentialStore, Http, ProfileStore, type Profile } from "../../src/hosted/contract"
 import { key, profile, unusedHttp } from "./account/fixture"
 
 it.effect("stores, reads, and revokes the OpenAI account for the selected hosted owner", () =>
@@ -162,92 +151,3 @@ it.effect("lists Personal, switches owners, clears projects, and returns to Pers
     }),
   ),
 )
-
-it.layer(BunServices.layer)((test) => {
-  test.effect("creates for Personal with zero organizations and fails closed for a stale organization", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-remote-thread-" })
-        yield* fileSystem.writeFileString(`${workspace}/local.txt`, "local workspace state")
-        const current = yield* Ref.make<Profile>({ ...profile, owner: { kind: "personal" } })
-        const created = yield* Ref.make(0)
-        const uploaded = yield* Ref.make(0)
-        const context = yield* Layer.build(
-          Layer.mergeAll(
-            Layer.succeed(
-              ProfileStore,
-              ProfileStore.of({
-                load: Ref.get(current).pipe(Effect.map(Option.some)),
-                save: (value) => Ref.set(current, value),
-              }),
-            ),
-            Layer.succeed(
-              CredentialStore,
-              CredentialStore.of({
-                load: () => Effect.succeed(Option.some({ refreshToken: Redacted.make("refresh"), privateJwk: key })),
-                save: () => Effect.void,
-                remove: () => Effect.succeed(true),
-                serialized: (effect) => effect,
-              }),
-            ),
-            Layer.succeed(
-              Http,
-              Http.of({
-                ...unusedHttp,
-                refresh: () => Effect.succeed({ accessToken: "access", refreshToken: "refresh", expiresIn: 600 }),
-                context: () =>
-                  Effect.succeed({
-                    account: { id: "user-1", email: "dev@example.test", name: "Dev" },
-                    organizations: [],
-                    projects: [],
-                  }),
-                issueThreadTicket: () =>
-                  Effect.succeed(
-                    Schema.decodeSync(ClientTicketResponse)({
-                      ticket: "ticket-1",
-                      expiresAt: "2026-08-21T06:00:00.000Z",
-                      websocketUrl: "wss://hosted.example.test/api/v1/threads/socket",
-                      protocol: "rika.thread.v1",
-                    }),
-                  ),
-                uploadWorkspaceSeed: (_origin, archive) =>
-                  Ref.update(uploaded, (value) => value + 1).pipe(
-                    Effect.as({
-                      id: "seed-1",
-                      contentDigest: archive.contentDigest,
-                      sizeBytes: archive.sizeBytes,
-                      expiresAt: "2026-08-21T06:10:00.000Z",
-                    }),
-                  ),
-              }),
-            ),
-            Layer.succeed(
-              ThreadClient,
-              ThreadClient.of({
-                create: ({ owner, executorKind, workspaceSeedId }) => {
-                  expect(owner).toEqual({ kind: "personal" })
-                  expect(executorKind).toBe("orb")
-                  expect(workspaceSeedId).toBe("seed-1")
-                  return Ref.update(created, (value) => value + 1).pipe(Effect.as(HostedThreadId.make("thread-1")))
-                },
-                submit: () => Effect.die("unused"),
-                ensureService: () => Effect.die("unused"),
-                stopService: () => Effect.die("unused"),
-                openPortal: () => Effect.die("unused"),
-              }),
-            ),
-            BunCrypto.layer,
-            TestConsole.layer,
-          ),
-        )
-        yield* createRemoteThread(workspace).pipe(Effect.provide(context))
-        yield* Ref.set(current, { ...profile, owner: { kind: "organization", organizationId: "revoked" } })
-        const error = yield* Effect.flip(createRemoteThread(workspace).pipe(Effect.provide(context)))
-        expect(error.message).toContain("rika org personal")
-        expect(yield* Ref.get(uploaded)).toBe(1)
-        expect(yield* Ref.get(created)).toBe(1)
-      }),
-    ),
-  )
-})

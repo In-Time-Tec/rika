@@ -1,18 +1,7 @@
 import { Context, Effect, Option, Redacted, Schema } from "effect"
-import type { ClientTicketResponse } from "@rika/product/client-protocol"
 import type { Credential as OpenAiAccountCredential } from "@rika/product/openai-auth-contract"
-import type { ExecutorKind } from "@rika/product/hosted-model"
-import { ThreadSummary } from "@rika/product/thread-summary"
 import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
-import type { RepositoryService } from "@rika/product/workspace-capability"
-import { Unit } from "@rika/transcript/transcript-unit"
 import * as HostedIdentity from "@rika/product/hosted-identity-context"
-import type {
-  RunnerTarget,
-  RunnerPollResult,
-  RunnerProfile,
-  RemoteThreadCreation,
-} from "@rika/product/runner-registration"
 
 export const defaultOrigin = "https://rika-app.up.railway.app"
 export const scopes = "openid profile email offline_access account"
@@ -133,66 +122,12 @@ export const CliDevice = Schema.Struct({
 })
 export type CliDevice = typeof CliDevice.Type
 
-export const HostedThreadId = Schema.NonEmptyString
-export type HostedThreadId = typeof HostedThreadId.Type
-
-export const WorkspaceSeedUpload = Schema.Struct({
-  id: Schema.NonEmptyString,
-  contentDigest: Schema.String.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
-  sizeBytes: Schema.Int.check(Schema.isGreaterThan(0)),
-  expiresAt: Schema.String,
-})
-export type WorkspaceSeedUpload = typeof WorkspaceSeedUpload.Type
-
-export const isHostedThreadId = Schema.is(HostedThreadId)
-
-export const HostedThreadList = Schema.Struct({ threads: Schema.Array(ThreadSummary) })
-export type HostedThreadList = typeof HostedThreadList.Type
-export const HostedThreadPreview = Schema.Struct({ units: Schema.Array(Unit) })
-export type HostedThreadPreview = typeof HostedThreadPreview.Type
-
-export const RecoveryInspection = Schema.Struct({
-  runId: Schema.NonEmptyString,
-  status: Schema.Literals([
-    "queued",
-    "running",
-    "waiting",
-    "needs-resolution",
-    "cancelling",
-    "succeeded",
-    "failed",
-    "cancelled",
-  ]),
-  operationDetails: Schema.optional(Schema.TaggedStruct("Unavailable", { reason: Schema.String })),
-})
-export type RecoveryInspection = typeof RecoveryInspection.Type
-
-export const RecoveryResolutionReceipt = Schema.Struct({
-  runId: Schema.NonEmptyString,
-  operationId: Schema.NonEmptyString,
-  idempotencyKey: Schema.NonEmptyString,
-})
-export type RecoveryResolutionReceipt = typeof RecoveryResolutionReceipt.Type
-
-export type RecoveryResolution =
-  | { readonly action: "retry" }
-  | { readonly action: "accept"; readonly value: unknown }
-  | { readonly action: "abort"; readonly reason: string }
-
 export const RunRequest = Schema.Struct({
   prompt: Schema.Array(Schema.String),
   mode: Schema.optionalKey(Schema.String),
   review: Schema.optionalKey(Schema.Literal(true)),
 })
 export type RunRequest = typeof RunRequest.Type
-
-export const RunResult = Schema.Struct({
-  commandId: Schema.String,
-  status: Schema.Literals(["accepted", "queued"]),
-  turnId: Schema.String,
-  text: Schema.String,
-})
-export type RunResult = typeof RunResult.Type
 
 export const EnvironmentReferenceStatus = Schema.Struct({
   id: Schema.String,
@@ -204,61 +139,6 @@ export const EnvironmentReferenceStatus = Schema.Struct({
   state: Schema.Literals(["active", "revoked"]),
 })
 export type EnvironmentReferenceStatus = typeof EnvironmentReferenceStatus.Type
-
-export const RepositoryPublicationStatus = Schema.Struct({
-  publicationId: Schema.String,
-  state: Schema.Literals(["approved", "pushing", "pushed", "completed", "failed", "unknown"]),
-  branch: Schema.String,
-  ref: Schema.String,
-  commitSha: Schema.String,
-  targetBranch: Schema.String,
-  targetCommitSha: Schema.String,
-  targetProtected: Schema.Boolean,
-  pushResult: Schema.NullOr(Schema.Unknown),
-  pullRequestResult: Schema.NullOr(Schema.Unknown),
-})
-export type RepositoryPublicationStatus = typeof RepositoryPublicationStatus.Type
-
-export interface ThreadClientInterface {
-  readonly create: (input: {
-    readonly ticket: ClientTicketResponse
-    readonly commandId: string
-    readonly owner: OwnerSelection
-    readonly project?: string
-    readonly executorKind: ExecutorKind
-    readonly runnerTarget?: RunnerTarget
-    readonly archiveThreadId?: HostedThreadId
-    readonly workspaceSeedId?: string
-  }) => Effect.Effect<HostedThreadId, HostedError>
-  readonly submit: (input: {
-    readonly ticket: ClientTicketResponse
-    readonly threadId: HostedThreadId
-    readonly request: RunRequest
-    readonly commandId: string
-  }) => Effect.Effect<RunResult, HostedError>
-  readonly ensureService: (input: {
-    readonly ticket: ClientTicketResponse
-    readonly threadId: HostedThreadId
-    readonly commandId: string
-    readonly service: RepositoryService
-  }) => Effect.Effect<void, HostedError>
-  readonly stopService: (input: {
-    readonly ticket: ClientTicketResponse
-    readonly threadId: HostedThreadId
-    readonly commandId: string
-    readonly serviceId: string
-  }) => Effect.Effect<void, HostedError>
-  readonly openPortal: (input: {
-    readonly ticket: ClientTicketResponse
-    readonly threadId: HostedThreadId
-    readonly requestId: string
-    readonly port: number
-  }) => Effect.Effect<string, HostedError>
-}
-
-export class ThreadClient extends Context.Service<ThreadClient, ThreadClientInterface>()(
-  "@rika/cli/hosted/contract/ThreadClient",
-) {}
 
 export const ModelProvider = Schema.Literals(["openai", "anthropic", "openrouter"])
 export type ModelProvider = typeof ModelProvider.Type
@@ -314,58 +194,6 @@ export interface HttpInterface {
   readonly devices: (origin: string, session: Session) => Effect.Effect<ReadonlyArray<CliDevice>, HostedError>
   readonly revokeDevice: (origin: string, deviceId: string, session: Session) => Effect.Effect<void, HostedError>
   readonly revokeAllDevices: (origin: string, session: Session) => Effect.Effect<void, HostedError>
-  readonly issueThreadTicket: (origin: string, session: Session) => Effect.Effect<ClientTicketResponse, HostedError>
-  readonly listThreads: (
-    origin: string,
-    owner: OwnerSelection,
-    project: string | undefined,
-    session: Session,
-  ) => Effect.Effect<ReadonlyArray<ThreadSummary>, HostedError>
-  readonly previewThread: (
-    origin: string,
-    threadId: string,
-    session: Session,
-  ) => Effect.Effect<ReadonlyArray<Unit>, HostedError>
-  readonly inspectRecovery: (
-    origin: string,
-    threadId: string,
-    runId: string,
-    session: Session,
-  ) => Effect.Effect<RecoveryInspection, HostedError>
-  readonly resolveRecovery: (
-    origin: string,
-    threadId: string,
-    runId: string,
-    operationId: string,
-    resolution: RecoveryResolution,
-    operationKey: string,
-    session: Session,
-  ) => Effect.Effect<RecoveryResolutionReceipt, HostedError>
-  readonly uploadWorkspaceSeed: (
-    origin: string,
-    archive: { readonly bytes: Uint8Array; readonly contentDigest: string; readonly sizeBytes: number },
-    sourceRepository: { readonly owner: string; readonly name: string } | undefined,
-    session: Session,
-  ) => Effect.Effect<WorkspaceSeedUpload, HostedError>
-  readonly registerRunner: (
-    origin: string,
-    checkoutFingerprint: string,
-    registration: RunnerProfile,
-    session: Session,
-  ) => Effect.Effect<void, HostedError>
-  readonly setRemoteThreadCreation: (
-    origin: string,
-    checkoutFingerprint: string,
-    preference: RemoteThreadCreation,
-    session: Session,
-  ) => Effect.Effect<void, HostedError>
-  readonly pollRunner: (
-    origin: string,
-    checkoutFingerprint: string,
-    supervisorId: string,
-    activeAssignmentIds: ReadonlyArray<string>,
-    session: Session,
-  ) => Effect.Effect<RunnerPollResult, HostedError>
   readonly putProviderCredential: (
     origin: string,
     owner: OwnerSelection,
@@ -424,16 +252,6 @@ export interface HttpInterface {
     scope: EnvironmentScope,
     session: Session,
   ) => Effect.Effect<EnvironmentReferenceStatus, HostedError>
-  readonly publishRepository: (
-    origin: string,
-    threadId: string,
-    commitSha: string,
-    targetBranch: string | undefined,
-    title: string,
-    body: string,
-    operationKey: string,
-    session: Session,
-  ) => Effect.Effect<RepositoryPublicationStatus, HostedError>
 }
 
 export class Http extends Context.Service<Http, HttpInterface>()("@rika/cli/hosted/contract/Http") {}

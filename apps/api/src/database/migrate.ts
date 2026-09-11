@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { BunFileSystem } from "@effect/platform-bun"
-import { Console, Effect, FileSystem, Layer, Redacted } from "effect"
+import { Console, Effect, FileSystem, Layer } from "effect"
 import {
   closePostgresPool,
   identityMigrations,
@@ -9,7 +9,6 @@ import {
   runMigration,
 } from "@rika/identity"
 import { migrations as productMigrations } from "@rika/product-store/migrations"
-import * as ExecutionPostgres from "@rika/execution/postgres"
 
 interface DatabaseMigration {
   readonly id: string
@@ -35,11 +34,7 @@ const program = Effect.scoped(
       })
     yield* Effect.forEach(identityMigrations, applyMigration)
     yield* Effect.forEach(productMigrations, applyMigration)
-    yield* ExecutionPostgres.applySchema({
-      url: Redacted.value(config.databaseUrl),
-      source: "rika-api",
-    })
-    yield* Console.log("Generalist PostgreSQL schema is compatible")
+    yield* Console.log("Identity and product PostgreSQL migrations are compatible")
   }),
 )
 

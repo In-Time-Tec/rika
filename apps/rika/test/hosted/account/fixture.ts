@@ -28,15 +28,6 @@ export const unusedHttp: HttpInterface = {
   devices: () => Effect.die("unused"),
   revokeDevice: () => Effect.die("unused"),
   revokeAllDevices: () => Effect.die("unused"),
-  issueThreadTicket: () => Effect.die("unused"),
-  listThreads: () => Effect.die("unused"),
-  previewThread: () => Effect.die("unused"),
-  inspectRecovery: () => Effect.die("unused"),
-  resolveRecovery: () => Effect.die("unused"),
-  uploadWorkspaceSeed: () => Effect.die("unused"),
-  registerRunner: () => Effect.die("unused"),
-  setRemoteThreadCreation: () => Effect.die("unused"),
-  pollRunner: () => Effect.die("unused"),
   putProviderCredential: () => Effect.die("unused"),
   listProviderCredentials: () => Effect.die("unused"),
   revokeProviderCredential: () => Effect.die("unused"),
@@ -46,7 +37,6 @@ export const unusedHttp: HttpInterface = {
   createProject: () => Effect.die("unused"),
   putEnvironment: () => Effect.die("unused"),
   revokeEnvironment: () => Effect.die("unused"),
-  publishRepository: () => Effect.die("unused"),
 }
 
 export const http = (overrides: Partial<HttpInterface> = {}) => Http.of({ ...unusedHttp, ...overrides })

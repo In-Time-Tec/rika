@@ -35,7 +35,7 @@ const screen = await testRender(
             id: `remote-older-${loadedOlderPages}`,
             kind: "assistant",
             title: "Rika",
-            text: "Loaded from hosted history",
+            text: "Loaded from Thread history",
           },
           ...previous,
         ])
@@ -118,7 +118,7 @@ try {
   screen.mockInput.pressKey("HOME")
   await screen.flush()
   assert.equal(loadedOlderPages, 1)
-  assert.match(screen.captureCharFrame(), /Loaded from hosted history/)
+  assert.match(screen.captureCharFrame(), /Loaded from Thread history/)
   setItems((previous) => previous.slice(2))
   await screen.flush()
 

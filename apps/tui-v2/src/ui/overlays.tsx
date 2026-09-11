@@ -27,7 +27,7 @@ export const modeOrder: readonly Mode[] = ["low", "medium", "high", "ultra"]
 
 const paletteLabels = new Map<string, readonly [string, string]>([
   ["new-thread", ["thread", "new"]],
-  ["new-orb-thread", ["thread", "new in Orb"]],
+  ["new-box-thread", ["thread", "new in Box"]],
   ["switch-thread", ["thread", "switch"]],
   ["mode", ["mode", "change mode"]],
   ["context", ["usage", "show context and usage"]],

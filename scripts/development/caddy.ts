@@ -9,7 +9,7 @@ class CaddyError extends Data.TaggedError("CaddyError")<{ readonly message: stri
 
 const program = Effect.gen(function* () {
   const publicUrl = yield* Config.string("PUBLIC_URL")
-  const executorPort = yield* Config.string("EXECUTOR_PORT")
+  const publicPort = yield* Config.string("PUBLIC_PORT")
   const http = yield* HttpClient.HttpClient
   const crypto = yield* Crypto.Crypto
   const readinessToken = yield* crypto.randomUUIDv4.pipe(
@@ -25,8 +25,8 @@ const program = Effect.gen(function* () {
     }),
   )
   const ready = http
-    .get(`http://127.0.0.1:${executorPort}/.rika-ready`, {
-      headers: { host: "executor.rika.invalid", "x-rika-readiness": readinessToken },
+    .get(`http://127.0.0.1:${publicPort}/.rika-ready`, {
+      headers: { "x-rika-readiness": readinessToken },
     })
     .pipe(
       Effect.filterOrFail(

@@ -3,7 +3,6 @@ import { Context, Effect } from "effect"
 import { CliError } from "effect/unstable/cli"
 import type { ModelProvider, RunRequest } from "../../hosted/contract"
 import type { EnvironmentPhase, EnvironmentScope } from "@rika/product/environment-policy"
-import type { RepositoryService } from "@rika/product/workspace-capability"
 
 export type Input =
   | {
@@ -43,51 +42,6 @@ export type Input =
       readonly action: "revoke"
       readonly name: string
       readonly scope?: EnvironmentScope | undefined
-    }
-  | {
-      readonly _tag: "ThreadService"
-      readonly action: "ensure"
-      readonly threadId: string
-      readonly service: RepositoryService
-    }
-  | { readonly _tag: "ThreadService"; readonly action: "stop"; readonly threadId: string; readonly serviceId: string }
-  | { readonly _tag: "ThreadPortal"; readonly threadId: string; readonly port: number }
-  | {
-      readonly _tag: "ThreadRecovery"
-      readonly action: "inspect"
-      readonly threadId: string
-      readonly runId: string
-    }
-  | {
-      readonly _tag: "ThreadRecovery"
-      readonly action: "retry"
-      readonly threadId: string
-      readonly runId: string
-      readonly operationId: string
-    }
-  | {
-      readonly _tag: "ThreadRecovery"
-      readonly action: "accept"
-      readonly threadId: string
-      readonly runId: string
-      readonly operationId: string
-      readonly value: unknown
-    }
-  | {
-      readonly _tag: "ThreadRecovery"
-      readonly action: "abort"
-      readonly threadId: string
-      readonly runId: string
-      readonly operationId: string
-      readonly reason: string
-    }
-  | {
-      readonly _tag: "ThreadSync"
-      readonly threadId: string
-      readonly commitSha: string
-      readonly targetBranch?: string | undefined
-      readonly title: string
-      readonly body: string
     }
 
 export interface Interface {

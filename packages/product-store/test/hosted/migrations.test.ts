@@ -75,6 +75,8 @@ it.effect("keeps hosted PostgreSQL migration identities and checksums exact", ()
       "product/0042_runner_assignment_poll_index",
       "product/0043_drop_unused_hosted_tables",
       "product/0044_process_observations",
+      "product/0045_box_assignment_bindings",
+      "product/0046_workspace_seed_owner_authority",
     ])
     expect(migrations.find(({ id }) => id === "product/0030_runtime_recovery_authority")?.aliases).toEqual([
       "product/0030_tenetkit_recovery_authority",

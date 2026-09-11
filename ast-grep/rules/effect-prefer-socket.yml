@@ -20,3 +20,4 @@ ignores:
   - "**/coverage/**"
   - "**/generated/**"
   - "node_modules/**"
+  - "apps/api/test/fixtures/runner-socket.ts"

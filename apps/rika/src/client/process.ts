@@ -1,23 +1,8 @@
 #!/usr/bin/env bun
-import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import * as BunSocket from "@effect/platform-bun/BunSocket"
 import * as HostedObservability from "@rika/product/hosted-observability"
 import * as ProductOperation from "@rika/product/product-operation"
 import * as Operation from "@rika/product/product-operation-service"
-import {
-  Cause,
-  Config,
-  Console,
-  Crypto,
-  Deferred,
-  Effect,
-  FileSystem,
-  Layer,
-  Option,
-  Path,
-  Schema,
-  Stdio,
-} from "effect"
+import { Cause, Config, Console, Crypto, Effect, FileSystem, Layer, Option, Path, Schema, Stdio } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { CliError, Command } from "effect/unstable/cli"
@@ -26,7 +11,6 @@ import * as HostedCommand from "../command/root/hosted"
 import * as RunnerCommand from "../command/root/runner"
 import * as Logging from "../diagnostics/file-logging"
 import { provideLayerScoped } from "../platform/provide"
-import { clientSigintOwnership, type SigintOwnership } from "./signal-ownership"
 
 type OperationFailure = ProductOperation.OperationUnavailable | Error
 
@@ -54,28 +38,16 @@ const liveSignalEmitter: SignalEmitter = {
 export const installClientSigintHandler = (input: {
   readonly rootFiber: () => InterruptibleRoot | undefined
   readonly onSignal: () => void
-  readonly ownership?: SigintOwnership
   readonly process?: SignalEmitter
 }) => {
-  const ownership = input.ownership ?? clientSigintOwnership
   const processEmitter = input.process ?? liveSignalEmitter
   const handler = () => {
-    if (!ownership.rootOwns()) return
     input.onSignal()
     input.rootFiber()?.interruptUnsafe()
   }
   processEmitter.on("SIGINT", handler)
   return () => processEmitter.off("SIGINT", handler)
 }
-
-export const runInProcessInteractive = Effect.fn("ClientMain.runInProcessInteractive")(function* <A, E, R, E2, R2>(
-  runner: Effect.Effect<never, E, R>,
-  interactive: Effect.Effect<A, E2, R2>,
-) {
-  yield* runner.pipe(Effect.forkScoped)
-  yield* Effect.yieldNow
-  return yield* interactive
-})
 
 const dispatcherLayer = () =>
   Layer.effect(
@@ -110,62 +82,25 @@ const dispatcherLayer = () =>
               })
               return yield* local.run(input)
             }
-            return yield* Effect.scoped(
-              Effect.gen(function* () {
-                const unavailable = "Interactive support could not be loaded"
-                const [Runner, HostedCli, interactive] = yield* Effect.all(
-                  [
-                    Effect.tryPromise({
-                      try: () => import("../runner/service"),
-                      catch: () =>
-                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
-                    }),
-                    Effect.tryPromise({
-                      try: () => import("../hosted/cli"),
-                      catch: () =>
-                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
-                    }),
-                    Effect.tryPromise({
-                      try: () => import("../hosted/interactive-controller"),
-                      catch: () =>
-                        ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
-                    }),
-                  ],
-                  { concurrency: 3 },
-                )
-                const environment = yield* Config.all({
-                  home: Config.option(Config.string("HOME")),
-                  visual: Config.option(Config.string("VISUAL")),
-                  editor: Config.option(Config.string("EDITOR")),
-                })
-                const home = Option.getOrElse(environment.home, () => process.cwd())
-                const editor = Option.getOrUndefined(environment.visual) ?? Option.getOrUndefined(environment.editor)
-                const runtimePlatform = Layer.mergeAll(BunCrypto.layer, BunSocket.layerWebSocketConstructor)
-                const hosted = HostedCli.liveLayer(home).pipe(Layer.provide(runtimePlatform))
-                const admission = Runner.liveAdmissionLayer.pipe(Layer.provide(hosted))
-                const runnerInput = {
-                  workspace: input.workspace ?? process.cwd(),
-                  preferencePath: yield* Runner.preferencePath,
-                  onStatus: Runner.logStatus,
-                }
-                const firstDraw = yield* Deferred.make<void>()
-                const firstDrawContext = yield* Effect.context<never>()
-                const runFirstDraw = Effect.runSyncWith(firstDrawContext)
-                yield* Deferred.await(firstDraw).pipe(Effect.andThen(startLogging), Effect.orDie, Effect.forkScoped)
-                return yield* interactive
-                  .runHostedInteractive(input, {
-                    editor,
-                    onFirstDraw: () =>
-                      runFirstDraw(
-                        HostedObservability.event("first_draw", "success", {}).pipe(
-                          Effect.ensuring(Deferred.succeed(firstDraw, undefined)),
-                        ),
-                      ),
-                    startRunner: (prepared, ready) => Runner.runRunner(runnerInput, prepared, ready),
-                  })
-                  .pipe(provideLayerScoped(Layer.mergeAll(runtimePlatform, hosted, admission)))
-              }),
+            const unavailable = "Interactive support could not be loaded"
+            const [online, HostedCli] = yield* Effect.all(
+              [
+                Effect.tryPromise({
+                  try: () => import("./online"),
+                  catch: () =>
+                    ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                }),
+                Effect.tryPromise({
+                  try: () => import("../hosted/cli"),
+                  catch: () =>
+                    ProductOperation.OperationUnavailable.make({ operation: input._tag, message: unavailable }),
+                }),
+              ],
+              { concurrency: 2 },
             )
+            const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
+            yield* startLogging.pipe(Effect.orDie)
+            return yield* online.runInteractive(input).pipe(provideLayerScoped(HostedCli.liveLayer(home)))
           }).pipe(
             Effect.provide(platform),
             Effect.mapError((error) => operationFailure(input, error)),
@@ -197,7 +132,19 @@ const hostedCommandLayer = Layer.effect(
                 message: "Account support could not be loaded",
               }),
           })
-          return yield* provideLayerScoped(hosted.liveLayer(home))(hosted.run(input))
+          if (input._tag !== "RemoteRun" && input._tag !== "RemoteThread")
+            return yield* provideLayerScoped(hosted.liveLayer(home))(hosted.run(input))
+          const online = yield* Effect.tryPromise({
+            try: () => import("./online"),
+            catch: () =>
+              ProductOperation.OperationUnavailable.make({
+                operation: input._tag,
+                message: "V2 client support could not be loaded",
+              }),
+          })
+          if (input._tag === "RemoteRun")
+            return yield* provideLayerScoped(hosted.liveLayer(home))(online.runRemote(input))
+          return yield* provideLayerScoped(hosted.liveLayer(home))(online.createOrbThread(input))
         }).pipe(Effect.provide(platform)),
     })
   }),
@@ -223,10 +170,10 @@ const runnerCommandLayer = Layer.effect(
               Effect.orDie,
             )
           const unavailable = "Runner support could not be loaded"
-          const [Runner, HostedCli] = yield* Effect.all(
+          const [online, HostedCli] = yield* Effect.all(
             [
               Effect.tryPromise({
-                try: () => import("../runner/service"),
+                try: () => import("./online"),
                 catch: () => ProductOperation.OperationUnavailable.make({ operation: "Runner", message: unavailable }),
               }),
               Effect.tryPromise({
@@ -237,21 +184,8 @@ const runnerCommandLayer = Layer.effect(
             { concurrency: 2 },
           )
           const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
-          const preferencePath = yield* Runner.preferencePath
           const hosted = HostedCli.liveLayer(home)
-          const runnerInput =
-            input.remoteThreadCreation === undefined
-              ? { workspace: input.workspace ?? process.cwd(), preferencePath, onStatus: Runner.printStatus }
-              : {
-                  workspace: input.workspace ?? process.cwd(),
-                  preferencePath,
-                  requestedPreference: input.remoteThreadCreation,
-                  onStatus: Runner.printStatus,
-                }
-          return yield* Runner.runRunner(runnerInput).pipe(
-            Effect.scoped,
-            provideLayerScoped(Layer.merge(hosted, Runner.liveAdmissionLayer.pipe(Layer.provide(hosted)))),
-          )
+          return yield* online.runHeadless(input).pipe(Effect.scoped, provideLayerScoped(hosted))
         }).pipe(
           Effect.provide(platform),
           Effect.mapError((error) =>
@@ -271,7 +205,7 @@ const printedCauseLimit = 2_000
  */
 export const reportRootFailure = (cause: Cause.Cause<unknown>) => {
   if (Cause.hasInterruptsOnly(cause)) return Effect.void
-  // Persistence may not have started yet (the TUI defers it to first draw); start it so buffered records reach disk.
+  // Parsing can fail before an operation starts persistence; start it so buffered records reach disk.
   const persist = Effect.serviceOption(Logging.DiagnosticPersistence).pipe(
     Effect.flatMap(
       Option.match({

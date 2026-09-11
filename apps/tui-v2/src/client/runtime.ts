@@ -6,30 +6,24 @@ import type { Activity, Client, Mode, PendingTurn, ScenarioId, ThreadView, Image
 import { clonePending, stateFromFixture } from "./state"
 import type { StoreState, StoreThread, StoreItem } from "./state"
 import { imageItem } from "./images"
-
 export interface CreateClientOptions {
   readonly scenario?: ScenarioId
   readonly delayMs?: number
 }
-
 type PlaybackFiber = Fiber.Fiber<void, never>
-
 type ActiveRun = {
   readonly token: number
   readonly itemIds: readonly string[]
   fiber?: PlaybackFiber
 }
-
 const defaultDelayMs = 120
 const genericReply = (prompt: string): string =>
   `I received “${prompt}”.\n\nThis is a deterministic offline reply. I would inspect the relevant files, explain the trade-offs, and show a small safe patch before making any change.`
-
 const splitReply = (text: string): readonly string[] => {
   const chunks: string[] = []
   for (let offset = 0; offset < text.length; offset += 22) chunks.push(text.slice(offset, offset + 22))
   return chunks
 }
-
 export const createClient = (options: CreateClientOptions = {}): Client => {
   const initialScenario = options.scenario ?? "welcome"
   const fixture = getScenarioFixture(initialScenario)
@@ -295,7 +289,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       )
     if (scenario === "reconnect") return startReconnect(threadId)
   }
-
   const cancelSelected = (): void => {
     const threadId = state.selectedThreadId
     const run = interruptRun(threadId)
@@ -314,7 +307,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       setActivity(threadId, "cancelled")
     }
   }
-
   const loadScenario = (scenario: ScenarioId): void => {
     if (disposed) return
     const nextFixture = getScenarioFixture(scenario)
@@ -325,13 +317,11 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     setStoreState(nextState)
     startScenarioPlayback(scenario)
   }
-
   const selectThread = (threadId: string): void => {
     if (disposed || threadIndex(threadId) < 0) return
     setStoreState("selectedThreadId", threadId)
   }
-
-  const newThread = (target: ThreadView["target"] = "runner"): void => {
+  const newThread = (target: ThreadView["target"] = "runner", archiveThreadId?: string): void => {
     if (disposed) return
     const threadId = nextId(`thread-${target}`)
     const thread: StoreThread = {
@@ -343,10 +333,13 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       pending: [],
       approval: null,
     }
-    setStoreState("threads", (threads: StoreThread[]) => [...threads, thread])
+    setStoreState("threads", (threads: StoreThread[]) =>
+      archiveThreadId === undefined
+        ? [...threads, thread]
+        : [...threads.filter((candidate) => candidate.id !== archiveThreadId), thread],
+    )
     setStoreState("selectedThreadId", threadId)
   }
-
   const submit = (prompt: string, images: readonly ImageAttachment[] = []): void => {
     if (disposed) return
     const text = prompt.trim()
@@ -366,7 +359,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     }
     startTurn(threadId, text, images)
   }
-
   const approve = (approved: boolean): void => {
     if (disposed) return
     const threadId = state.selectedThreadId
@@ -391,7 +383,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     }
     startApproval(threadId, waitingTool.id)
   }
-
   const editPending = (id: string, prompt: string): void => {
     if (disposed) return
     const threadId = state.selectedThreadId
@@ -406,7 +397,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       thread.pending.map((turn) => (turn.id === id ? { ...turn, prompt: text } : turn)),
     )
   }
-
   const removePending = (id: string): void => {
     if (disposed) return
     const threadId = state.selectedThreadId
@@ -418,7 +408,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       thread.pending.filter((turn) => turn.id !== id),
     )
   }
-
   const steerPending = (id: string): void => {
     if (disposed) return
     const threadId = state.selectedThreadId
@@ -444,7 +433,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     if (wasBusy) for (const image of pending.images ?? []) appendItem(threadId, imageItem(image, nextId("image")))
     if (!wasBusy && thread.approval === null) startTurn(threadId, pending.prompt, pending.images)
   }
-
   const interruptAndSend = (prompt: string, images: readonly ImageAttachment[] = []): void => {
     if (disposed) return
     const text = prompt.trim()
@@ -452,11 +440,9 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     cancelSelected()
     submit(text, images)
   }
-
   const setMode = (mode: Mode): void => {
     if (!disposed) setStoreState("mode", mode)
   }
-
   const dispose = Effect.runSync(
     Effect.cached(
       Effect.suspend(() => {
@@ -468,19 +454,34 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
       }),
     ),
   )
-
   const client: Client = {
     state,
     loadScenario,
     selectThread,
     newThread,
-    archiveThread: () => {
+    archiveThread: (onArchived) => {
       if (disposed) return
-      cancelSelected()
       const id = state.selectedThreadId
+      if (threadIndex(id) < 0) {
+        setStoreState("notice", "Select a Thread before archiving.")
+        return
+      }
+      onArchived?.()
+      cancelSelected()
       setStoreState("threads", (threads: StoreThread[]) => threads.filter((thread) => thread.id !== id))
       const next = state.threads[0]
       if (next !== undefined) setStoreState("selectedThreadId", next.id)
+    },
+    archiveAndNewThread: (onCreated) => {
+      if (disposed) return
+      const id = state.selectedThreadId
+      if (threadIndex(id) < 0) {
+        setStoreState("notice", "Select a Thread before archiving.")
+        return
+      }
+      cancelSelected()
+      newThread("runner", id)
+      onCreated?.()
     },
     submit,
     cancel: cancelSelected,
@@ -494,7 +495,6 @@ export const createClient = (options: CreateClientOptions = {}): Client => {
     setMode,
     dispose,
   }
-
   startScenarioPlayback(initialScenario)
   return client
 }

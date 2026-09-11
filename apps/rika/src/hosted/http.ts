@@ -1,12 +1,8 @@
 import { Effect, Layer, Option, Redacted, Schema } from "effect"
-import { ClientTicketResponse } from "@rika/product/client-protocol"
-import { RunnerPollResult } from "@rika/product/runner-registration"
 import { HttpClientRequest } from "effect/unstable/http"
 import {
   DeviceAuthorization,
   HostedError,
-  HostedThreadList,
-  HostedThreadPreview,
   EnvironmentReferenceStatus,
   Http,
   IdentityContext,
@@ -14,11 +10,7 @@ import {
   OpenAiAccountStatus,
   ProviderCredentialStatus,
   Project,
-  RecoveryInspection,
-  RecoveryResolutionReceipt,
   Registration,
-  RepositoryPublicationStatus,
-  WorkspaceSeedUpload,
   scopes,
   type DevicePoll,
   type OwnerSelection,
@@ -203,113 +195,6 @@ export const layer = Layer.effect(
         const url = `${origin}/api/v1/auth/cli/devices/revoke-all`
         return authenticatedEmpty("POST", url, HttpClientRequest.post(url), session, "All CLI device revocation")
       },
-      issueThreadTicket: (origin, session) => {
-        const url = `${origin}/api/v1/thread-sessions`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url),
-          session,
-          ClientTicketResponse,
-          "Thread session",
-        )
-      },
-      listThreads: (origin, owner, project, session) => {
-        const url = `${origin}/api/v1/threads/list`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.bodyJsonUnsafe({ owner: ownerWire(owner), project_id: project }),
-          ),
-          session,
-          HostedThreadList,
-          "Thread list",
-        ).pipe(Effect.map((response) => response.threads))
-      },
-      previewThread: (origin, threadId, session) => {
-        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/preview`
-        return authenticatedJson(
-          "GET",
-          url,
-          HttpClientRequest.get(url),
-          session,
-          HostedThreadPreview,
-          "Thread preview",
-        ).pipe(Effect.map((response) => response.units))
-      },
-      inspectRecovery: (origin, threadId, runId, session) => {
-        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/recovery`
-        return authenticatedJson(
-          "GET",
-          url,
-          HttpClientRequest.get(url),
-          session,
-          RecoveryInspection,
-          "Thread recovery inspection",
-        )
-      },
-      resolveRecovery: (origin, threadId, runId, operationId, resolution, operationKey, session) => {
-        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/runs/${encodeURIComponent(runId)}/recovery/${encodeURIComponent(operationId)}`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.setHeader("idempotency-key", operationKey),
-            HttpClientRequest.bodyJsonUnsafe(resolution),
-          ),
-          session,
-          RecoveryResolutionReceipt,
-          "Thread recovery resolution",
-        )
-      },
-      uploadWorkspaceSeed: (origin, archive, sourceRepository, session) => {
-        const url = `${origin}/api/v1/workspace-seeds`
-        const request = HttpClientRequest.post(url).pipe(
-          HttpClientRequest.setHeader("x-rika-content-digest", archive.contentDigest),
-          HttpClientRequest.bodyUint8Array(archive.bytes, "application/vnd.rika.workspace-seed+zstd"),
-        )
-        const withRepository =
-          sourceRepository === undefined
-            ? request
-            : HttpClientRequest.setHeader(
-                request,
-                "x-rika-source-repository",
-                `${sourceRepository.owner}/${sourceRepository.name}`,
-              )
-        return authenticatedJson("POST", url, withRepository, session, WorkspaceSeedUpload, "Workspace seed upload")
-      },
-      registerRunner: (origin, checkoutFingerprint, registration, session) => {
-        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}`
-        return authenticatedEmpty(
-          "PUT",
-          url,
-          HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe(registration)),
-          session,
-          "Runner registration",
-        )
-      },
-      setRemoteThreadCreation: (origin, checkoutFingerprint, preference, session) => {
-        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}/remote-thread-creation`
-        return authenticatedEmpty(
-          "PUT",
-          url,
-          HttpClientRequest.put(url).pipe(HttpClientRequest.bodyJsonUnsafe({ preference })),
-          session,
-          "Runner preference",
-        )
-      },
-      pollRunner: (origin, checkoutFingerprint, supervisorId, activeAssignmentIds, session) => {
-        const url = `${origin}/api/v1/runners/${encodeURIComponent(checkoutFingerprint)}/admissions`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(HttpClientRequest.bodyJsonUnsafe({ supervisorId, activeAssignmentIds })),
-          session,
-          RunnerPollResult,
-          "Runner admission",
-        )
-      },
       putProviderCredential: (origin, owner, provider, apiKey, session) => {
         const url = `${origin}/api/v1/provider-credentials/${provider}`
         return authenticatedJson(
@@ -431,25 +316,6 @@ export const layer = Layer.effect(
           session,
           EnvironmentReferenceStatus,
           "Secret revocation",
-        )
-      },
-      publishRepository: (origin, threadId, commitSha, targetBranch, title, body, operationKey, session) => {
-        const url = `${origin}/api/v1/threads/${encodeURIComponent(threadId)}/repository-publications`
-        return authenticatedJson(
-          "POST",
-          url,
-          HttpClientRequest.post(url).pipe(
-            HttpClientRequest.setHeader("idempotency-key", operationKey),
-            HttpClientRequest.bodyJsonUnsafe({
-              commit_sha: commitSha,
-              target_branch: targetBranch,
-              title,
-              body,
-            }),
-          ),
-          session,
-          RepositoryPublicationStatus,
-          "Repository synchronization",
         )
       },
     })

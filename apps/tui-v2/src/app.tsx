@@ -1,6 +1,6 @@
 import type { KeyEvent, TextareaRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import type { Accessor, Setter } from "solid-js"
 import { Effect } from "effect"
 import type { Fiber } from "effect"
@@ -187,17 +187,14 @@ const createController = (props: AppProps) => {
     props.client.newThread(target)
     setFocus("composer")
   }
-  const archiveAndNew = () =>
-    batch(() => {
-      cancelEdit()
-      props.client.archiveThread()
-      newThread("runner")
+  const archiveAndNew = () => {
+    cancelEdit()
+    props.client.archiveAndNewThread(() => {
+      setPendingSelection(undefined)
       closeOverlay()
     })
-  const archiveAndQuit = () => {
-    props.client.archiveThread()
-    props.onQuit()
   }
+  const archiveAndQuit = () => props.client.archiveThread(props.onQuit)
   const openFile = (path: string) => {
     const diff = changedItems().find((item) => item.title === path)
     const content =

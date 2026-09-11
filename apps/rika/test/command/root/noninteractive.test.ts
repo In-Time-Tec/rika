@@ -328,7 +328,7 @@ it.effect("creates and continues hosted Threads without a local Thread operation
   }),
 )
 
-it.effect("routes Projects, secrets, repository services, portals, and synchronization", () =>
+it.effect("routes Projects and secrets but exposes no removed V1 Thread controls", () =>
   Effect.gen(function* () {
     expect(yield* capture(["project", "list"])).toEqual([{ _tag: "Project", action: "list" }])
     expect(yield* capture(["project", "create", "Remote Platform"])).toEqual([
@@ -340,34 +340,10 @@ it.effect("routes Projects, secrets, repository services, portals, and synchroni
     expect(yield* capture(["secret", "revoke", "DEPLOY_TOKEN", "--scope", "project"])).toEqual([
       { _tag: "Secret", action: "revoke", name: "DEPLOY_TOKEN", scope: "project" },
     ])
-    expect(
-      yield* capture(["thread", "service", "start", "thread-1", "web", "bun", "run", "dev", "--cwd", "apps/web"]),
-    ).toEqual([
-      {
-        _tag: "ThreadService",
-        action: "ensure",
-        threadId: "thread-1",
-        service: { serviceId: "web", command: "bun", args: ["run", "dev"], cwd: "apps/web" },
-      },
-    ])
-    expect(yield* capture(["thread", "service", "stop", "thread-1", "web"])).toEqual([
-      { _tag: "ThreadService", action: "stop", threadId: "thread-1", serviceId: "web" },
-    ])
-    expect(yield* capture(["thread", "portal", "thread-1", "3000"])).toEqual([
-      { _tag: "ThreadPortal", threadId: "thread-1", port: 3000 },
-    ])
-    expect(
-      yield* capture(["thread", "sync", "thread-1", "0123456789abcdef0123456789abcdef01234567", "--target", "main"]),
-    ).toEqual([
-      {
-        _tag: "ThreadSync",
-        threadId: "thread-1",
-        commitSha: "0123456789abcdef0123456789abcdef01234567",
-        targetBranch: "main",
-        title: "Rika: synchronize 0123456789ab",
-        body: "",
-      },
-    ])
+    yield* failsWithoutDispatch(["thread", "service", "start", "thread-1", "web", "bun"])
+    yield* failsWithoutDispatch(["thread", "portal", "thread-1", "3000"])
+    yield* failsWithoutDispatch(["thread", "recovery", "inspect", "thread-1", "run-1"])
+    yield* failsWithoutDispatch(["thread", "sync", "thread-1", "0123456789abcdef0123456789abcdef01234567"])
   }),
 )
 

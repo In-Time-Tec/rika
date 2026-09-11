@@ -1,5 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import solidPlugin from "@opentui/solid/bun-plugin"
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildNpmPackages } from "./npm-package"
@@ -145,6 +146,7 @@ const program = Effect.gen(function* () {
             compile: { target: metadata.bun, outfile },
             bytecode: false,
             minify: true,
+            plugins: [solidPlugin],
             external: ["msgpackr-extract"],
             loader: { ".txt": "text" },
             define: {

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/workspace-input",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./archive": "./src/archive.ts",
+    "./contract": "./src/contract.ts",
+    "./repository": "./src/repository.ts",
+    "./vault": "./src/vault.ts",
+    "./workspace-seed-http-contract": "./src/workspace-seed-http-contract.ts"
+  },
+  "scripts": {
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js --deny-warnings packages/workspace-input/src packages/workspace-input/test",
+    "test": "bun --cwd ../.. --bun vitest run --project unit packages/workspace-input",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "catalog:",
+    "@rika/product": "workspace:*",
+    "effect": "4.0.0-rc.112"
+  },
+  "devDependencies": {
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "@effect/vitest": "4.0.0-rc.112",
+    "@types/bun": "1.4.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "workspace-input"
+  }
+}

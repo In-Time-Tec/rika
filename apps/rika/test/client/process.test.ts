@@ -1,45 +1,31 @@
 import { expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Ref } from "effect"
-import { runInProcessInteractive } from "../../src/client/process"
+import { installClientSigintHandler } from "../../src/client/process"
 
-const operation = Effect.gen(function* () {
-  const started = yield* Deferred.make<void>()
-  const stopped = yield* Deferred.make<void>()
-  const launches = yield* Ref.make(0)
-  const runner = Ref.update(launches, (count) => count + 1).pipe(
-    Effect.andThen(Deferred.succeed(started, undefined)),
-    Effect.andThen(Effect.never),
-    Effect.ensuring(Deferred.succeed(stopped, undefined)),
-  )
-  return { started, stopped, launches, runner }
+const makeEmitter = () => {
+  const listeners = new Set<() => void>()
+  return {
+    on: (_event: "SIGINT", listener: () => void) => listeners.add(listener),
+    off: (_event: "SIGINT", listener: () => void) => listeners.delete(listener),
+    emit: () => {
+      for (const listener of listeners) listener()
+    },
+  }
+}
+
+it("installs a removable root SIGINT handler", () => {
+  const emitter = makeEmitter()
+  let interrupts = 0
+  let signals = 0
+  const remove = installClientSigintHandler({
+    rootFiber: () => ({ interruptUnsafe: () => interrupts++ }),
+    onSignal: () => signals++,
+    process: emitter,
+  })
+
+  emitter.emit()
+  expect({ interrupts, signals }).toEqual({ interrupts: 1, signals: 1 })
+
+  remove()
+  emitter.emit()
+  expect({ interrupts, signals }).toEqual({ interrupts: 1, signals: 1 })
 })
-
-it.effect("starts one Runner branch and interrupts it when the TUI finishes", () =>
-  Effect.gen(function* () {
-    const fixture = yield* operation
-    expect(
-      yield* Effect.scoped(runInProcessInteractive(fixture.runner, Deferred.await(fixture.started))),
-    ).toBeUndefined()
-    yield* Deferred.await(fixture.stopped)
-    expect(yield* Ref.get(fixture.launches)).toBe(1)
-  }),
-)
-
-it.effect("interrupts the Runner branch when the TUI fails or the operation is interrupted", () =>
-  Effect.gen(function* () {
-    const failed = yield* operation
-    expect(
-      yield* Effect.scoped(runInProcessInteractive(failed.runner, Effect.fail("tui failed"))).pipe(
-        Effect.catch((error) => Effect.succeed(error)),
-      ),
-    ).toBe("tui failed")
-    yield* Deferred.await(failed.stopped)
-
-    const interrupted = yield* operation
-    const fiber = yield* Effect.forkChild(Effect.scoped(runInProcessInteractive(interrupted.runner, Effect.never)))
-    yield* Deferred.await(interrupted.started)
-    yield* Fiber.interrupt(fiber)
-    yield* Deferred.await(interrupted.stopped)
-    expect(yield* Ref.get(interrupted.launches)).toBe(1)
-  }),
-)

@@ -99,6 +99,7 @@ export function createWorkload(size: WorkloadSize) {
     loadScenario: unsupported,
     newThread: unsupported,
     archiveThread: unsupported,
+    archiveAndNewThread: unsupported,
     submit: unsupported,
     cancel: unsupported,
     stop: unsupported,

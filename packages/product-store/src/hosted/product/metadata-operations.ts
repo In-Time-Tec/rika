@@ -1,11 +1,7 @@
-import { and, asc, desc, eq, gt, lt, notExists, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, lt, notExists, or, type SQL } from "drizzle-orm"
 import * as PgDrizzle from "drizzle-orm/effect-postgres"
 import { Effect } from "effect"
-import {
-  rikaHostedThreads,
-  rikaThreadDeletionOutbox,
-  rikaThreads,
-} from "../../database/schema/product"
+import { rikaHostedThreads, rikaThreadDeletionOutbox, rikaThreads } from "../../database/schema/product"
 import {
   ProductRepositoryError,
   type ProductRepositoryService,
@@ -45,6 +41,12 @@ export const metadataOperations = Effect.gen(function* () {
           .where(eq(rikaThreadDeletionOutbox.threadId, rikaThreads.id)),
       ),
     ]
+    if (input.projectId !== undefined)
+      filters.push(
+        input.projectId === null
+          ? isNull(rikaHostedThreads.projectId)
+          : eq(rikaHostedThreads.projectId, input.projectId),
+      )
     if (input.cursor !== undefined) {
       const pinned = Number(input.cursor.pinned)
       filters.push(
@@ -119,5 +121,20 @@ export const metadataOperations = Effect.gen(function* () {
         .limit(1),
     ).pipe(Effect.map((rows) => (rows[0] === undefined ? undefined : metadataRow(rows[0]))))
 
-  return { threadMetadataList, threadMetadata }
+  const archiveThread: ProductRepositoryService["archiveThread"] = (input) =>
+    query(
+      db
+        .update(rikaThreads)
+        .set({ archived: 1, updatedAt: input.nowMillis })
+        .where(and(eq(rikaThreads.ownerId, input.ownerId), eq(rikaThreads.id, input.threadId)))
+        .returning({ id: rikaThreads.id }),
+    ).pipe(
+      Effect.flatMap((rows) =>
+        rows[0] === undefined
+          ? Effect.fail(ProductRepositoryError.make({ kind: "not-found", message: "Thread is unavailable" }))
+          : Effect.void,
+      ),
+    )
+
+  return { threadMetadataList, threadMetadata, archiveThread }
 })

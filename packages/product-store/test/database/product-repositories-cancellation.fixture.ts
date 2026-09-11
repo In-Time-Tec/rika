@@ -1,8 +1,8 @@
-import { clientLayer } from "@rika/execution/postgres"
 import * as PgClient from "@effect/sql-pg/PgClient"
 import { expect, it } from "@effect/vitest"
-import { Clock, Config, Context, Deferred, Effect, Exit, Fiber, Layer, Redacted } from "effect"
+import { Clock, Config, Context, Deferred, Effect, Exit, Fiber, Layer, Redacted, Stream } from "effect"
 import { Pool } from "pg"
+import { clientLayer } from "../../src/database/postgres"
 
 const databaseUrl = Effect.runSync(Config.string("RIKA_HOSTED_POSTGRES_TEST_DATABASE_URL").pipe(Config.withDefault("")))
 const live = it.live.skipIf(databaseUrl === "")
@@ -45,11 +45,44 @@ live(
         const started = yield* Clock.currentTimeMillis
         yield* Fiber.interrupt(running)
         expect((yield* Clock.currentTimeMillis) - started).toBeLessThan(1_000)
+        const activity = yield* Effect.tryPromise(() =>
+          admin.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid = $1 AND state = 'active'",
+            [pid],
+          ),
+        )
+        expect(activity.rows[0]?.count).toBe(0)
         const next = yield* sql.withTransaction(
           sql<{ pid: number; ok: number }>`SELECT pg_backend_pid() AS pid, 1 AS ok`,
         )
         expect(next[0]?.ok).toBe(1)
         expect(next[0]?.pid).not.toBe(pid)
+      }),
+    ),
+  { timeout: 10_000 },
+)
+
+live(
+  "interrupts an active stream, cancels its server query, and discards its connection",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { sql, admin } = yield* clients
+        const pid = (yield* sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`)[0]!.pid
+        const query = "SELECT pg_sleep(2)"
+        const running = yield* sql.unsafe(query).stream.pipe(Stream.runDrain, Effect.forkChild)
+        yield* waitForQuery(admin, pid, query)
+        const started = yield* Clock.currentTimeMillis
+        yield* Fiber.interrupt(running)
+        expect((yield* Clock.currentTimeMillis) - started).toBeLessThan(1_000)
+        const activity = yield* Effect.tryPromise(() =>
+          admin.query<{ count: number }>(
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE pid = $1 AND state = 'active'",
+            [pid],
+          ),
+        )
+        expect(activity.rows[0]?.count).toBe(0)
+        expect((yield* sql<{ pid: number }>`SELECT pg_backend_pid() AS pid`)[0]?.pid).not.toBe(pid)
       }),
     ),
   { timeout: 10_000 },

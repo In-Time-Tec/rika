@@ -15,6 +15,7 @@ export const workspaceOperations = Effect.gen(function* () {
         .insert(rikaHostedWorkspaceSeeds)
         .values({
           id: input.id,
+          ownerId: input.ownerId,
           createdByUserId: input.userId,
           createdByDeviceId: input.deviceId,
           createdByClientId: input.clientId,

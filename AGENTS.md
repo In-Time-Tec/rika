@@ -1,6 +1,6 @@
 # Rika
 
-Rika is a collaborative coding-agent CLI and OpenTUI application written in Effect TypeScript. A local Runner works in a user-controlled checkout; an explicitly selected Orb works in an isolated E2B workspace. The hosted API owns identity, access, Threads, and product state, while Generalist owns durable execution and the agent loop.
+Rika is a collaborative coding-agent CLI and OpenTUI application written in Effect TypeScript. A local Runner works in a user-controlled checkout; an explicitly selected Orb works in an isolated Box workspace. The hosted API owns identity, access, Threads, and product state, while Generalist owns durable execution and the agent loop.
 
 Read [PRODUCT.md](PRODUCT.md) for product direction and [CONTEXT.md](CONTEXT.md) for exact vocabulary and ownership. Current behavior belongs in [docs/features](docs/features), lasting choices in [docs/decisions](docs/decisions), and meaningful costs in [docs/tradeoffs](docs/tradeoffs).
 
@@ -58,15 +58,18 @@ Use the `testing-with-pilotty` skill for fast interaction checks and `testing-wi
 ## Sources of truth
 
 - `apps/rika` owns the packaged CLI, TUI process, hosted client, and local Runner.
-- `apps/tui-v2` owns the standalone offline Solid/OpenTUI interface and deterministic scenarios. It uses Effect V4 and Effect/CLI, has no hosted transport, and is not part of the production CLI release.
-- `apps/api` owns hosted composition, HTTP and WebSocket entry points, model routing, command workers, and Executor assignment.
+- `apps/tui-v2` owns the connected Solid/OpenTUI interface embedded in the packaged CLI and its standalone offline deterministic scenarios (`bun run tui-v2`). It uses Effect V4 and Effect/CLI.
+- `apps/api` owns the hosted composition: identity, authorization, Project/Thread product metadata, explicit Runner/Orb placement, and the Runner and Box execution gateways. It delegates Sessions, Runs, queues, receipts, retries, cancellation, and recovery to released Generalist 0.65.3, keeps durable object state in `generalist/durability/s3`, and uses `generalist/unstable/rivet` as the scoped Runtime host behind `/api/rivet/*`. Readiness is `/api/rivet/metadata`; there is no `/readyz`.
 - `apps/web` owns browser rendering and browser-local interaction only. `apps/proxy` is the only public Railway ingress.
 - `packages/product` owns Rika product contracts and rules. `packages/product-store` owns their PostgreSQL persistence and migrations.
-- `packages/execution` is Rika's Generalist boundary. Generalist remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
-- `packages/execution` owns the four native workspace tool implementations (`bash`, `edit`, `read`, and `shell_command_status`) and routes remote calls through durable outer operation identities.
+- `packages/execution` owns the shared WorkspaceExecutor boundary: binding and fencing contracts, transport, operation identities, and the native tool schemas. Generalist remains the authority for Runs, model turns, tool operations, retries, cancellation, and Run events; see [execution authority](docs/decisions/execution-authority.md).
+- `packages/runner` owns the local Runner process, including the native workspace tool implementations (`bash`, `edit`, `read`, `shell_command_status`, and search) and the compiled Box executor entrypoint source.
+- `packages/box-executor` owns the Orb-side Box workspace lifecycle: provider control plane, enrollment, pinned template policy, and workspace-input contracts.
+- `packages/client` owns the hosted client boundary used by the CLI and TUI: product and Generalist adapters, Thread projection, Runner admission, and workspace-seed staging.
+- `packages/context` owns Rika's Session materialization contract: resolved guidance, skills, and bounded workspace capture as data, never as credential or tool authority.
+- `packages/workspace-input` owns the archive, seed, and repository workspace-input authority shared by Runner and Orb preparation.
 - `packages/terminal` owns terminal state and presentation. Keep OpenTUI imports behind that adapter.
-- `packages/e2b-executor`, `packages/remote-execution`, and `infra/e2b` own Orb execution. E2B is the only remote workspace provider; see [the E2B decision](docs/decisions/e2b-remote-execution.md).
-- `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract.
+- `scripts/packaging/package-contract.ts`, `scripts/packaging/package-target.ts`, and `.github/workflows/publish.yml` own the current release artifact contract. `scripts/packaging/box-executor.ts` and `artifacts/box-executor` own the Box executor artifact pipeline; `infra/box` owns the Box image source.
 
 Use released Generalist, Effect, FoldKit, and OpenTUI package exports. Browser Thread control is a FoldKit program; client and Executor transport uses WebSockets.
 
@@ -77,12 +80,12 @@ Keep temporary run state under a distinct `.agents/state/<run>/` directory. It i
 Treat these paths as production-sensitive:
 
 - `packages/identity/migrations`, `packages/product-store/migrations`, and `apps/api/src/database/migrate.ts` change PostgreSQL authority.
-- `apps/api/src/config`, `apps/api/src/security`, `packages/credential-vault`, `packages/identity`, and `packages/github-app` handle production identity, authorization, credentials, or repository access.
+- `apps/api/src/bootstrap`, `apps/api/src/identity`, `packages/credential-vault`, `packages/identity`, and `packages/github-app` handle production identity, authorization, credentials, or repository access.
 - `apps/proxy/Caddyfile` and `apps/*/railway.json` define public ingress and Railway deployment behavior. Production follows `main`; pull requests receive isolated Railway environments as described in [the Railway decision](docs/decisions/railway-api.md).
-- `infra/e2b`, `packages/e2b-executor`, and `.github/workflows/executor-image.yml` define the immutable production Executor image and E2B template promotion.
+- `infra/box`, `artifacts/box-executor`, and `scripts/packaging/box-executor.ts` define the Box executor artifact and image source; the production Box template is provisioned out-of-band and pinned by `RIKA_BOX_TEMPLATE_BOX_ID`/`RIKA_BOX_TEMPLATE_SNAPSHOT_ID`.
 - `.github/workflows/publish.yml`, `install.sh`, and `scripts/packaging` define release installation and publication.
 
-Do not print secrets or put credentials in source, logs, Executor payloads, snapshots, or artifacts. Do not run production migrations, deploy, promote an Executor image, publish packages, create a release, or push a tag unless the user explicitly requests that exact external action.
+Do not print secrets or put credentials in source, logs, Executor payloads, snapshots, or artifacts. Do not run production migrations, deploy, promote a Box template, publish packages, create a release, or push a tag unless the user explicitly requests that exact external action.
 
 `bun run dev:remote` is a live Railway mutation. It creates one isolated personal project using the ignored
 `.alchemy/rika-dev-stage` identity. Never replace that identity with `production`, `staging`, or `pr-*`, and never
@@ -90,4 +93,4 @@ delete `.alchemy` while resources may remain. `bun run dev:remote:destroy` retai
 so failed cleanup can be retried. Railway provisioning credentials stay in the Alchemy process and must not be
 added to service variables. Set `RAILWAY_WORKSPACE_ID` explicitly before any personal deployment.
 
-CI has separate `quality`, `tui`, and `proc` jobs. A `v*` tag runs the publish workflow: the tag must equal `v` plus `apps/rika/package.json`'s version, the tagged commit must have green CI unless an explicit audited override is used, native archives are built for `darwin-arm64`, `linux-arm64`, and `linux-x64`, and the workflow verifies inventory, architecture, checksums, and provenance before publishing GitHub and npm artifacts. The Executor image is promoted only by its separate manual workflow with a new generation and `promote=true`.
+CI has separate `quality`, `tui`, and `proc` jobs. A `v*` tag runs the publish workflow: the tag must equal `v` plus `apps/rika/package.json`'s version, the tagged commit must have green CI unless an explicit audited override is used, native archives are built for `darwin-arm64`, `linux-arm64`, and `linux-x64`, and the workflow verifies inventory, architecture, checksums, and provenance before publishing GitHub and npm artifacts. The Box executor artifact is built locally by `scripts/packaging/box-executor.ts` into `artifacts/box-executor`; the production Box template is provisioned out-of-band from that artifact, never by a CI promotion workflow.

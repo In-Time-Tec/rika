@@ -10,7 +10,6 @@ import { providers as railwayProviders } from "alchemy/Railway/Providers"
 import { Service as RailwayService } from "alchemy/Railway/Service"
 import { ref as railwayRef } from "alchemy/Railway/ref"
 import { Effect, Layer, Redacted } from "effect"
-import { developmentTemplateSourceDigest } from "./packages/e2b-executor/src/development-template"
 const pathIs = (flag: "-L" | "-f", path: string) =>
   Bun.spawnSync(["test", flag, path], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
 process.umask(0o077)
@@ -81,43 +80,40 @@ const railwayInputs =
           RESEND_API_KEY: readRequired("Email", "RESEND_API_KEY"),
           EMAIL_FROM: readRequired("Email", "EMAIL_FROM"),
         },
-        e2b: {
-          E2B_API_KEY: readRequired("Remote E2B", "E2B_API_KEY"),
-          E2B_TEMPLATE_ID: readRequired("Remote E2B", "E2B_TEMPLATE_ID"),
-          E2B_TEMPLATE_BUILD_ID: readRequired("Remote E2B", "E2B_TEMPLATE_BUILD_ID"),
+        runtime: {
+          RIVET_ENDPOINT: readRequired("Rivet runtime", "RIVET_ENDPOINT"),
+          RIKA_API_REVISION: readRequired("Runtime", "RIKA_API_REVISION"),
+        },
+        model: {
+          RIKA_MODEL_PROVIDER: readRequired("Model", "RIKA_MODEL_PROVIDER"),
+          RIKA_MODEL_ID: readRequired("Model", "RIKA_MODEL_ID"),
+        },
+        box: {
+          BOX_API_URL: readRequired("Box", "BOX_API_URL"),
+          BOX_API_KEY: readRequired("Box", "BOX_API_KEY"),
+          RIKA_BOX_TEMPLATE_BOX_ID: readRequired("Box", "RIKA_BOX_TEMPLATE_BOX_ID"),
+          RIKA_BOX_TEMPLATE_SNAPSHOT_ID: readRequired("Box", "RIKA_BOX_TEMPLATE_SNAPSHOT_ID"),
+          RIKA_BOX_PROVIDER_SCOPE: readRequired("Box", "RIKA_BOX_PROVIDER_SCOPE"),
         },
       }
 
 const publicPort = target === "local" ? Number(Bun.env.PORT ?? "3000") : 3000
-if (!Number.isSafeInteger(publicPort) || publicPort <= 0 || publicPort > 65_532)
-  throw new Error("PORT must leave three consecutive ports available")
+if (!Number.isSafeInteger(publicPort) || publicPort <= 0 || publicPort > 65_533)
+  throw new Error("PORT must leave two consecutive ports available")
 const apiPort = publicPort + 1
 const webPort = publicPort + 2
-const executorPort = publicPort + 3
 const publicUrl = Bun.env.PUBLIC_URL?.trim() || `http://localhost:${publicPort}`
-const openRouterApiKey = target === "local" ? Bun.env.OPENROUTER_API_KEY?.trim() : "unused"
-if (openRouterApiKey === undefined || openRouterApiKey.length === 0) throw new Error("OPENROUTER_API_KEY is required")
 
 const readLocal = (name: string) => {
   if (target !== "local") return undefined
   const value = Bun.env[name]?.trim()
   return value === undefined || value.length === 0 ? undefined : value
 }
-const e2bApiKey = readLocal("E2B_API_KEY")
-const e2bAppId = readLocal("E2B_APP_ID")
-const e2bDeploymentId = readLocal("E2B_DEPLOYMENT_ID")
-const e2bConfigured = e2bApiKey !== undefined || e2bAppId !== undefined || e2bDeploymentId !== undefined
-const e2bEnabled = e2bApiKey !== undefined && e2bAppId !== undefined && e2bDeploymentId !== undefined
-if (e2bConfigured && !e2bEnabled) throw new Error("E2B development requires E2B_API_KEY, E2B_APP_ID, E2B_DEPLOYMENT_ID")
-const e2b =
-  e2bApiKey === undefined || e2bAppId === undefined || e2bDeploymentId === undefined
-    ? undefined
-    : {
-        apiKey: e2bApiKey,
-        appId: e2bAppId,
-        deploymentId: e2bDeploymentId,
-        sourceDigest: await developmentTemplateSourceDigest(process.cwd()),
-      }
+const readOptional = (name: string) => {
+  const value = Bun.env[name]?.trim()
+  return value === undefined || value.length === 0 ? undefined : value
+}
+const localOrbConfigured = readLocal("BOX_API_KEY") !== undefined
 
 const dockerProviders = Layer.effect(
   Docker.Providers,
@@ -146,12 +142,12 @@ const localStack = Alchemy.Stack(
       Redacted.make(`0123456789abcdef${Redacted.value(value)}`),
     )
     const providerKeyHex = yield* Alchemy.makeRandom("ProviderCredentialKey")
-    const workspaceKeyHex = yield* Alchemy.makeRandom("WorkspaceEncryptionKey")
+    const workspaceInputKeyHex = yield* Alchemy.makeRandom("WorkspaceInputKey")
     const minioSecret = yield* Alchemy.makeRandom("MinioSecret")
     const providerCredentialKey = Output.map(providerKeyHex, (value) =>
       Redacted.make(Buffer.from(Redacted.value(value), "hex").toString("base64")),
     )
-    const workspaceEncryptionKey = Output.map(workspaceKeyHex, (value) =>
+    const workspaceInputKey = Output.map(workspaceInputKeyHex, (value) =>
       Redacted.make(Buffer.from(Redacted.value(value), "hex").toString("base64")),
     )
     const databaseUrl = Output.map(postgresPassword, (password) =>
@@ -198,7 +194,7 @@ const localStack = Alchemy.Stack(
         AWS_ACCESS_KEY_ID: "rika-development",
         AWS_SECRET_ACCESS_KEY: minioSecret,
         AWS_REGION: "us-east-1",
-        RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
+        RIKA_RUNTIME_STORAGE_BUCKET: "rika-development",
         RIKA_DEV_OBJECT_STORE_URL: "http://127.0.0.1:19000",
         RIKA_DEV_POSTGRES_CONTAINER: Output.map(Output.of(postgres), () => "ready"),
         RIKA_DEV_MINIO_CONTAINER: Output.map(Output.of(minio), () => "ready"),
@@ -218,21 +214,6 @@ const localStack = Alchemy.Stack(
       memo: false,
       timeout: "2 minutes",
     })
-    const executorTemplate =
-      e2b === undefined
-        ? undefined
-        : yield* Command.Exec("EnsureDevelopmentExecutorTemplate", {
-            command: "bun packages/e2b-executor/scripts/ensure-development-template.ts",
-            env: {
-              E2B_API_KEY: Redacted.make(e2b.apiKey),
-              RIKA_DEV_E2B_SOURCE_DIGEST: e2b.sourceDigest,
-              RIKA_DEV_E2B_IDENTITY_PATH: ".alchemy/e2b-development-template.json",
-              RIKA_DEV_REPOSITORY_ROOT: process.cwd(),
-            },
-            memo: false,
-            timeout: "30 minutes",
-          })
-
     const proxy = yield* Command.Dev("DevelopmentProxy", {
       command: "bun scripts/development/caddy.ts",
       env: {
@@ -240,12 +221,12 @@ const localStack = Alchemy.Stack(
         PUBLIC_PORT: String(publicPort),
         API_PORT: String(apiPort),
         WEB_PORT: String(webPort),
-        EXECUTOR_PORT: String(executorPort),
       },
     })
 
-    const apiEnvironmentBase = {
+    const apiEnvironment = {
       NODE_ENV: "development",
+      HOST: "127.0.0.1",
       PORT: String(apiPort),
       DATABASE_URL: databaseUrl,
       DATABASE_SSL: "disable",
@@ -253,35 +234,18 @@ const localStack = Alchemy.Stack(
       BETTER_AUTH_TRUSTED_ORIGINS: publicUrl,
       BETTER_AUTH_SECRET: authSecret,
       RIKA_PROVIDER_CREDENTIAL_KEY: providerCredentialKey,
-      RIKA_DEV_SEED: "1",
-      RIKA_DEV_OPENROUTER_API_KEY: Redacted.make(openRouterApiKey),
+      RIKA_WORKSPACE_INPUT_KEY: workspaceInputKey,
+      RIKA_RUNTIME_ENVIRONMENT: readLocal("RIKA_RUNTIME_ENVIRONMENT") ?? "development",
+      RIKA_API_REVISION: readLocal("RIKA_API_REVISION") ?? "development",
+      RIKA_RUNTIME_STORAGE_BUCKET: "rika-development",
+      RIKA_RUNTIME_STORAGE_REGION: "us-east-1",
+      RIKA_RUNTIME_STORAGE_ENDPOINT: "http://127.0.0.1:19000",
+      RIKA_RUNTIME_STORAGE_FORCE_PATH_STYLE: "true",
       AWS_ACCESS_KEY_ID: "rika-development",
       AWS_SECRET_ACCESS_KEY: minioSecret,
-      AWS_REGION: "us-east-1",
       RIKA_DEV_MIGRATIONS: Output.map(Output.of(migrations), () => "ready"),
+      RIKA_DEV_PROXY: Output.map(Output.of(proxy), () => "ready"),
     }
-    const developmentModel = Bun.env.RIKA_DEV_MODEL?.trim()
-    const modelEnvironment =
-      developmentModel === undefined ? apiEnvironmentBase : { ...apiEnvironmentBase, RIKA_DEV_MODEL: developmentModel }
-    const apiEnvironment =
-      e2b === undefined || executorTemplate === undefined
-        ? modelEnvironment
-        : {
-            ...modelEnvironment,
-            E2B_API_KEY: Redacted.make(e2b.apiKey),
-            E2B_APP_ID: e2b.appId,
-            E2B_DEPLOYMENT_ID: e2b.deploymentId,
-            RIKA_DEV_E2B_SOURCE_DIGEST: e2b.sourceDigest,
-            RIKA_DEV_E2B_IDENTITY_PATH: ".alchemy/e2b-development-template.json",
-            RIKA_DEV_E2B_TEMPLATE_READY: Output.map(Output.of(executorTemplate), () => "ready"),
-            RIKA_DEV_EXECUTOR_ORIGIN: `http://127.0.0.1:${executorPort}`,
-            RIKA_DEV_PROXY: Output.map(Output.of(proxy), () => "ready"),
-            RIKA_WORKSPACE_CHECKPOINT_BUCKET: "rika-development",
-            RIKA_WORKSPACE_CHECKPOINT_REGION: "us-east-1",
-            RIKA_WORKSPACE_CHECKPOINT_ENDPOINT: "http://127.0.0.1:19000",
-            RIKA_WORKSPACE_ENCRYPTION_KEY: workspaceEncryptionKey,
-            RIKA_WORKSPACE_SETUP_CACHE: "false",
-          }
     yield* Command.Dev("Api", {
       command: "bun scripts/development/api.ts",
       env: apiEnvironment,
@@ -304,7 +268,7 @@ const localStack = Alchemy.Stack(
       },
     })
 
-    return { url: publicUrl, orbExecution: e2bEnabled }
+    return { url: publicUrl, orbExecution: localOrbConfigured }
   }),
 )
 
@@ -318,10 +282,14 @@ const railwayStack = () =>
         githubOauth: { GITHUB_CLIENT_ID: "destroy", GITHUB_CLIENT_SECRET: "destroy" },
         githubApp: { GITHUB_APP_ID: "1", GITHUB_APP_PRIVATE_KEY: "destroy" },
         mail: { RESEND_API_KEY: "destroy", EMAIL_FROM: "destroy@example.invalid" },
-        e2b: {
-          E2B_API_KEY: "destroy",
-          E2B_TEMPLATE_ID: "destroy",
-          E2B_TEMPLATE_BUILD_ID: "destroy",
+        runtime: { RIVET_ENDPOINT: "https://destroy.invalid", RIKA_API_REVISION: "destroy" },
+        model: { RIKA_MODEL_PROVIDER: "destroy", RIKA_MODEL_ID: "destroy" },
+        box: {
+          BOX_API_URL: "https://destroy.invalid",
+          BOX_API_KEY: "destroy",
+          RIKA_BOX_TEMPLATE_BOX_ID: "destroy",
+          RIKA_BOX_TEMPLATE_SNAPSHOT_ID: "destroy",
+          RIKA_BOX_PROVIDER_SCOPE: "destroy",
         },
       }
       const stage = yield* Alchemy.Stage
@@ -331,11 +299,11 @@ const railwayStack = () =>
         Redacted.make(`0123456789abcdef${Redacted.value(value)}`),
       )
       const providerKeyHex = yield* Alchemy.makeRandom("ProviderCredentialKey")
-      const workspaceKeyHex = yield* Alchemy.makeRandom("WorkspaceEncryptionKey")
+      const workspaceInputKeyHex = yield* Alchemy.makeRandom("WorkspaceInputKey")
       const providerCredentialKey = Output.map(providerKeyHex, (value) =>
         Redacted.make(Buffer.from(Redacted.value(value), "hex").toString("base64")),
       )
-      const workspaceEncryptionKey = Output.map(workspaceKeyHex, (value) =>
+      const workspaceInputKey = Output.map(workspaceInputKeyHex, (value) =>
         Redacted.make(Buffer.from(Redacted.value(value), "hex").toString("base64")),
       )
 
@@ -354,9 +322,9 @@ const railwayStack = () =>
         public: false,
       })
       const databaseUrl = Output.map(Output.of(postgres), () => railwayRef("postgres", "DATABASE_URL"))
-      const bucket = yield* RailwayBucket("workspace-checkpoints", {
+      const bucket = yield* RailwayBucket("runtime-storage", {
         project,
-        name: "workspace-checkpoints",
+        name: "runtime-storage",
       })
       const bucketName = requireOutput("the Storage Bucket name", bucket.s3BucketName, "destroy")
       const bucketRegion = requireOutput("the Storage Bucket region", bucket.s3Region, "auto")
@@ -419,6 +387,57 @@ const railwayStack = () =>
         },
       })
 
+      const rivetNamespace = readOptional("RIVET_NAMESPACE")
+      const rivetToken = readOptional("RIVET_TOKEN")
+      const storageSessionToken = readOptional("AWS_SESSION_TOKEN")
+      const storageForcePathStyle = readOptional("RIKA_RUNTIME_STORAGE_FORCE_PATH_STYLE")
+      const modelMaxOutputTokens = readOptional("RIKA_MODEL_MAX_OUTPUT_TOKENS")
+      const modelReasoningEffort = readOptional("RIKA_MODEL_REASONING_EFFORT")
+      const boxTtlSeconds = readOptional("RIKA_BOX_TTL_SECONDS")
+      const apiEnvironment = {
+        NODE_ENV: "production",
+        PORT: "3000",
+        DATABASE_URL: databaseUrl,
+        DATABASE_SSL: "disable",
+        BETTER_AUTH_URL: publicOrigin,
+        BETTER_AUTH_TRUSTED_ORIGINS: publicOrigin,
+        BETTER_AUTH_SECRET: authSecret,
+        GITHUB_CLIENT_ID: inputs.githubOauth.GITHUB_CLIENT_ID,
+        GITHUB_CLIENT_SECRET: Redacted.make(inputs.githubOauth.GITHUB_CLIENT_SECRET),
+        GITHUB_APP_ID: inputs.githubApp.GITHUB_APP_ID,
+        GITHUB_APP_PRIVATE_KEY: Redacted.make(inputs.githubApp.GITHUB_APP_PRIVATE_KEY),
+        RESEND_API_KEY: Redacted.make(inputs.mail.RESEND_API_KEY),
+        EMAIL_FROM: inputs.mail.EMAIL_FROM,
+        RIKA_PROVIDER_CREDENTIAL_KEY: providerCredentialKey,
+        RIKA_WORKSPACE_INPUT_KEY: workspaceInputKey,
+        RIKA_RUNTIME_ENVIRONMENT: `rika-${stage}`,
+        RIKA_API_REVISION: inputs.runtime.RIKA_API_REVISION,
+        RIVET_ENDPOINT: inputs.runtime.RIVET_ENDPOINT,
+        RIKA_MODEL_PROVIDER: inputs.model.RIKA_MODEL_PROVIDER,
+        RIKA_MODEL_ID: inputs.model.RIKA_MODEL_ID,
+        BOX_API_URL: inputs.box.BOX_API_URL,
+        BOX_API_KEY: Redacted.make(inputs.box.BOX_API_KEY),
+        RIKA_BOX_TEMPLATE_BOX_ID: inputs.box.RIKA_BOX_TEMPLATE_BOX_ID,
+        RIKA_BOX_TEMPLATE_SNAPSHOT_ID: inputs.box.RIKA_BOX_TEMPLATE_SNAPSHOT_ID,
+        RIKA_BOX_PROVIDER_SCOPE: inputs.box.RIKA_BOX_PROVIDER_SCOPE,
+        RIKA_RUNTIME_STORAGE_BUCKET: bucketName,
+        RIKA_RUNTIME_STORAGE_REGION: bucketRegion,
+        RIKA_RUNTIME_STORAGE_ENDPOINT: bucketEndpoint,
+        AWS_ACCESS_KEY_ID: bucketAccessKey,
+        AWS_SECRET_ACCESS_KEY: bucketSecretKey,
+      }
+      if (rivetNamespace !== undefined) Object.assign(apiEnvironment, { RIVET_NAMESPACE: rivetNamespace })
+      if (rivetToken !== undefined) Object.assign(apiEnvironment, { RIVET_TOKEN: Redacted.make(rivetToken) })
+      if (storageSessionToken !== undefined)
+        Object.assign(apiEnvironment, { AWS_SESSION_TOKEN: Redacted.make(storageSessionToken) })
+      if (storageForcePathStyle !== undefined)
+        Object.assign(apiEnvironment, { RIKA_RUNTIME_STORAGE_FORCE_PATH_STYLE: storageForcePathStyle })
+      if (modelMaxOutputTokens !== undefined)
+        Object.assign(apiEnvironment, { RIKA_MODEL_MAX_OUTPUT_TOKENS: modelMaxOutputTokens })
+      if (modelReasoningEffort !== undefined)
+        Object.assign(apiEnvironment, { RIKA_MODEL_REASONING_EFFORT: modelReasoningEffort })
+      if (boxTtlSeconds !== undefined) Object.assign(apiEnvironment, { RIKA_BOX_TTL_SECONDS: boxTtlSeconds })
+
       const api = yield* RailwayService("api", {
         project,
         name: "api",
@@ -428,7 +447,7 @@ const railwayStack = () =>
         publicDomain: false,
         preDeploy: { command: "bun --cwd apps/api migrate" },
         startCommand: "bun --cwd apps/api start",
-        healthcheckPath: "/readyz",
+        healthcheckPath: "/api/rivet/metadata",
         healthcheckTimeout: 300,
         restartPolicyType: "ON_FAILURE",
         restartPolicyMaxRetries: 5,
@@ -442,37 +461,7 @@ const railwayStack = () =>
           "bun.lock",
           "tsconfig.json",
         ],
-        env: {
-          NODE_ENV: "production",
-          PORT: "3000",
-          DATABASE_URL: databaseUrl,
-          DATABASE_SSL: "disable",
-          BETTER_AUTH_URL: publicOrigin,
-          BETTER_AUTH_TRUSTED_ORIGINS: publicOrigin,
-          BETTER_AUTH_SECRET: authSecret,
-          GITHUB_CLIENT_ID: inputs.githubOauth.GITHUB_CLIENT_ID,
-          GITHUB_CLIENT_SECRET: Redacted.make(inputs.githubOauth.GITHUB_CLIENT_SECRET),
-          GITHUB_APP_ID: inputs.githubApp.GITHUB_APP_ID,
-          GITHUB_APP_PRIVATE_KEY: Redacted.make(inputs.githubApp.GITHUB_APP_PRIVATE_KEY),
-          RESEND_API_KEY: Redacted.make(inputs.mail.RESEND_API_KEY),
-          EMAIL_FROM: inputs.mail.EMAIL_FROM,
-          E2B_API_KEY: Redacted.make(inputs.e2b.E2B_API_KEY),
-          E2B_APP_ID: "rika",
-          E2B_DEPLOYMENT_ID: `rika-${stage}`,
-          E2B_TEMPLATE_ID: inputs.e2b.E2B_TEMPLATE_ID,
-          E2B_TEMPLATE_BUILD_ID: inputs.e2b.E2B_TEMPLATE_BUILD_ID,
-          RIKA_EXECUTOR_API_URL: Output.map(proxyDomain, (domain) => `wss://${domain}/api/v1/executors`),
-          RIKA_WORKSPACE_CHECKPOINT_BUCKET: bucketName,
-          RIKA_WORKSPACE_CHECKPOINT_REGION: bucketRegion,
-          RIKA_WORKSPACE_CHECKPOINT_ENDPOINT: bucketEndpoint,
-          RIKA_WORKSPACE_ENCRYPTION_KEY: workspaceEncryptionKey,
-          RIKA_WORKSPACE_SETUP_CACHE: "false",
-          RIKA_PROVIDER_CREDENTIAL_KEY: providerCredentialKey,
-          RIKA_PROXY_PUBLIC_DOMAIN: proxyDomain,
-          AWS_ACCESS_KEY_ID: bucketAccessKey,
-          AWS_SECRET_ACCESS_KEY: bucketSecretKey,
-          AWS_REGION: bucketRegion,
-        },
+        env: apiEnvironment,
       })
 
       return {

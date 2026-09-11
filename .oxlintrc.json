@@ -193,12 +193,6 @@
   },
   "overrides": [
     {
-      "files": ["apps/rika/src/platform/client-entry-host.ts", "apps/rika/test/client-startup-preview.test.ts"],
-      "rules": {
-        "effecttsgo/process-env": "off"
-      }
-    },
-    {
       "files": ["apps/api/src/main.ts"],
       "rules": {
         "effecttsgo/strict-effect-provide": "off"
@@ -225,7 +219,7 @@
       }
     },
     {
-      "files": ["apps/tui-v2/**", "packages/runner-v2/**"],
+      "files": ["apps/tui-v2/**", "packages/runner/**"],
       "rules": {
         "effecttsgo/duplicate-package": "off"
       }

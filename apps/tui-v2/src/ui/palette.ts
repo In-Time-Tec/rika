@@ -35,7 +35,7 @@ export function createPalette(options: PaletteOptions) {
     if (!options.isOpen()) return []
     const entries: PaletteEntry[] = [
       { id: "new-thread", label: "New Thread", detail: "Ctrl+N", run: () => newThread("runner") },
-      { id: "new-orb-thread", label: "New Thread in Orb", detail: "Ctrl+Shift+N", run: () => newThread("orb") },
+      { id: "new-box-thread", label: "New Thread in a Box", detail: "Ctrl+Shift+N", run: () => newThread("orb") },
       { id: "switch-thread", label: "Switch Thread", detail: "Ctrl+T", run: () => openThreadSwitcher() },
       { id: "mode", label: "Change mode", detail: "Ctrl+S", run: openModePicker },
       { id: "context", label: "Show context and usage", detail: "Ctrl+Y", run: () => setOverlay("context") },

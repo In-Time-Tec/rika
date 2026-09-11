@@ -1,11 +1,9 @@
 import * as ProductOperation from "@rika/product/product-operation"
 import { Context, Effect } from "effect"
 import { CliError } from "effect/unstable/cli"
-import type { RemoteThreadCreation } from "../../runner/contract"
-
 export interface Input {
   readonly workspace?: string | undefined
-  readonly remoteThreadCreation?: RemoteThreadCreation | undefined
+  readonly remoteThreadCreation?: "allowed" | "denied" | undefined
 }
 
 export interface Interface {

@@ -58,6 +58,7 @@ export interface ThreadExecutionProjection {
   readonly providerInstanceId: string | null
   readonly checkout: unknown
   readonly localRepository: unknown
+  readonly placement: unknown
 }
 export type CreateConnectionResult =
   | { readonly _tag: "Created"; readonly threadId: string }
@@ -70,6 +71,7 @@ export type CreateConnectionResult =
 export interface ProductRepositoryService {
   readonly stageWorkspaceSeed: (input: {
     readonly id: string
+    readonly ownerId: string
     readonly userId: string
     readonly deviceId: string
     readonly clientId: string
@@ -143,12 +145,19 @@ export interface ProductRepositoryService {
     readonly ownerId: string
     readonly cursor?: ProductThreadMetadataCursor
     readonly limit: number
+    /** Restrict the page to one Project; `null` selects Threads without a Project. */
+    readonly projectId?: string | null
   }) => Effect.Effect<ProductThreadMetadataPage, ProductRepositoryError>
   /** Read canonical product Thread metadata for one owner. */
   readonly threadMetadata: (
     ownerId: string,
     threadId: string,
   ) => Effect.Effect<ProductThreadMetadata | undefined, ProductRepositoryError>
+  readonly archiveThread: (input: {
+    readonly ownerId: string
+    readonly threadId: string
+    readonly nowMillis: number
+  }) => Effect.Effect<void, ProductRepositoryError>
   readonly threadExecutionContext: (
     ownerId: string,
     threadId: string,

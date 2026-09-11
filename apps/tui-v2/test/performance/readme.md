@@ -2,7 +2,7 @@
 
 This bounded, offline workload mounts the real Solid `App` in OpenTUI's released
 test renderer at 216 columns by 62 rows. It does not run models, tools, network
-requests, workspace operations, or the hosted runtime. A real Solid store backs
+requests, workspace operations, or the Generalist Runtime. A real Solid store backs
 the `Client` interface; unsupported interaction commands deliberately fail.
 
 Run each case in a **fresh process** from `apps/tui-v2`, using the repository's

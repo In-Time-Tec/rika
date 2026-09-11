@@ -1,4 +1,4 @@
-/* oxlint-disable complexity -- hosted history transport wiring stays at the view boundary. */
+/* oxlint-disable complexity -- history transport wiring stays at the view boundary. */
 import { Show } from "solid-js"
 import type { AppProps, AppViewState } from "../app"
 import { Transcript } from "./transcript"

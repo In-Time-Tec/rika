@@ -2,11 +2,17 @@ import { homedir } from "node:os"
 import { Function } from "effect"
 import type { ClientState, Mode, ScenarioId } from "./client/model"
 
+const safeLine = (value: string): string => value.replace(/[\p{Cc}\p{Cf}]/gu, " ")
+
 export interface ExitReceipt {
   readonly title: string
   readonly workspace: string
   readonly mode: Mode
   readonly scenario: ScenarioId
+  readonly online?: {
+    readonly apiUrl: string
+    readonly threadId?: string
+  }
 }
 
 export const captureExitReceipt: {
@@ -21,6 +27,20 @@ export const captureExitReceipt: {
     scenario: state.scenario,
   }),
 )
+
+export const captureOnlineExitReceipt: {
+  (state: ClientState, workspace: string, apiUrl: string): ExitReceipt
+  (workspace: string, apiUrl: string): (state: ClientState) => ExitReceipt
+} = Function.dual(3, (state: ClientState, workspace: string, apiUrl: string): ExitReceipt => {
+  const selected =
+    state.selectedThreadId.trim().length === 0
+      ? undefined
+      : state.threads.find((thread) => thread.id === state.selectedThreadId)
+  const base = captureExitReceipt(state, workspace)
+  return selected === undefined || safeLine(selected.id).trim().length === 0
+    ? { ...base, online: { apiUrl } }
+    : { ...base, online: { apiUrl, threadId: selected.id } }
+})
 
 const modeRgb = {
   low: [255, 215, 0],
@@ -40,7 +60,18 @@ const brightness = [
 ] as const
 
 const reset = "\x1b[0m"
-const safeLine = (value: string): string => value.replace(/[\p{Cc}\p{Cf}]/gu, " ")
+const safeApiUrl = (value: string): string => {
+  try {
+    const url = new URL(value)
+    url.username = ""
+    url.password = ""
+    url.search = ""
+    url.hash = ""
+    return safeLine(url.toString())
+  } catch {
+    return safeLine(value)
+  }
+}
 
 export const renderExitReceipt = (input: ExitReceipt): string => {
   const home = homedir()
@@ -61,5 +92,15 @@ export const renderExitReceipt = (input: ExitReceipt): string => {
     else if (row === 2) detail = `\x1b[38;2;102;102;102m${safeLine(workspace)}${reset}`
     return `${painted}${reset}${detail.length > 0 ? `${" ".repeat(17 - glyph.length)}${detail}` : ""}`
   })
-  return `\n${lines.join("\n")}\n\nOffline demo — relaunch scenario (not a saved session):\nbun run tui-v2 --scenario ${input.scenario}`
+  const onlineThreadId =
+    input.online === undefined || input.online.threadId === undefined ? undefined : safeLine(input.online.threadId)
+  const detail =
+    input.online === undefined
+      ? `Offline demo — relaunch scenario (not a saved session):\nbun run tui-v2 --offline --scenario ${input.scenario}`
+      : [
+          "Online connection:",
+          `API: ${safeApiUrl(input.online.apiUrl)}`,
+          ...(onlineThreadId === undefined || onlineThreadId.trim().length === 0 ? [] : [`Thread: ${onlineThreadId}`]),
+        ].join("\n")
+  return `\n${lines.join("\n")}\n\n${detail}`
 }

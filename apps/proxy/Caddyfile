@@ -23,23 +23,7 @@
 		respond "ok" 200
 	}
 
-	@executor path /api/v1/executors
-	handle @executor {
-		reverse_proxy {
-			dynamic a {
-				name {$API_DOMAIN}
-				port {$API_PORT}
-				refresh 1s
-				dial_timeout 2s
-				versions ipv4
-			}
-			lb_retries 0
-			header_up Host {upstream_hostport}
-			header_up X-Rika-Client-IP {client_ip}
-		}
-	}
-
-	@api path /api/* /healthz /readyz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
+	@api path /api/* /healthz /.well-known/oauth-authorization-server/api/auth /.well-known/oauth-protected-resource/api/v1
 	handle @api {
 		reverse_proxy {
 			dynamic a {
