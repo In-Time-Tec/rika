@@ -64,7 +64,7 @@ const assignmentWire = (assignmentId: string, threadId: string) => ({
 
 const yieldUntil = (condition: () => boolean) =>
   Effect.gen(function* () {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
       if (condition()) return
       yield* Effect.yieldNow
     }

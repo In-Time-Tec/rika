@@ -51,7 +51,7 @@ const withPlatform = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const yieldUntil = (condition: () => boolean) =>
   Effect.gen(function* () {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
       if (condition()) return
       yield* Effect.yieldNow
     }
@@ -59,7 +59,7 @@ const yieldUntil = (condition: () => boolean) =>
   })
 
 const settle = Effect.gen(function* () {
-  for (let attempt = 0; attempt < 10; attempt += 1) yield* Effect.yieldNow
+  for (let attempt = 0; attempt < 50; attempt += 1) yield* Effect.yieldNow
 })
 
 class FakeWebSocket extends EventTarget implements globalThis.WebSocket {

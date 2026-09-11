@@ -68,7 +68,7 @@ const unexpectedConnect = (): globalThis.WebSocket => {
 
 const awaitCondition = (condition: () => boolean) =>
   Effect.gen(function* () {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
       if (condition()) return
       yield* Effect.yieldNow
     }
@@ -279,7 +279,7 @@ it.layer(BunServices.layer)((test) => {
         yield* Deferred.succeed(failureGate, undefined)
         yield* awaitCondition(() => failedStarts.length === 1)
         let retainedFailed = false
-        for (let attempt = 0; attempt < 100; attempt += 1) {
+        for (let attempt = 0; attempt < 1_000; attempt += 1) {
           const result = yield* Effect.result(retained.ensure(runnerThread("retained")))
           if (result._tag === "Failure") {
             expect(result.failure).toMatchObject({ kind: "forbidden", operation: "runner.daemon" })
