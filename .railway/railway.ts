@@ -22,7 +22,7 @@ export default defineRailway(() => {
       drainingSeconds: 30,
       requiredMountPath: "/data",
     },
-    volumeMounts: { "rivet-engine-data": { mountPath: "/data" } },
+    volumeMounts: { "/data": rivetEngineData },
     env: {
       RIVET_PUBLIC_URL: "http://rivet.railway.internal:6420",
       RIVET__FILE_SYSTEM__PATH: "/data",
