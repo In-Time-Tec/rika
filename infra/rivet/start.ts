@@ -1,11 +1,9 @@
-import { createRequire } from "node:module"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawn } from "node:child_process"
 
-const require = createRequire(import.meta.url)
-const { getEnginePath } = require(require.resolve("rivetkit"))("@rivetkit/engine-cli")
+const { getEnginePath } = require("@rivetkit/engine-cli")
 
 const guardHost = process.env.RIVET__GUARD__HOST ?? "::"
 const guardPort = Number(process.env.RIVET__GUARD__PORT ?? "6420")

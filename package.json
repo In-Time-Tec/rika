@@ -144,11 +144,12 @@
     "alchemy": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
+    "pg-cursor": "catalog:",
     "prettier": "catalog:",
+    "railway": "3.11.0",
     "turbo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:",
-    "pg-cursor": "catalog:"
+    "vitest": "catalog:"
   },
   "rika": {
     "kind": "application",

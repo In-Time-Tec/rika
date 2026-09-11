@@ -1,0 +1,8 @@
+{
+  "name": "rika-rivet-engine",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@rivetkit/engine-cli": "2.3.15"
+  }
+}
