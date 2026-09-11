@@ -150,7 +150,14 @@ const storageOptions = (config: ApiV2ProductionConfig): RuntimeStorageOptions =>
     bucket: config.runtimeStorage.bucket,
     region: config.runtimeStorage.region,
   }
-  if (config.runtimeStorage.endpoint !== undefined) Object.assign(options, { endpoint: config.runtimeStorage.endpoint })
+  if (config.runtimeStorage.endpoint !== undefined) {
+    Object.assign(options, {
+      endpoint: config.runtimeStorage.endpoint,
+      // A configured endpoint attests the deployment's chosen object store. The Railway/Tigris
+      // bucket guarantees conditional create, strong reads, and consistent listing.
+      capabilities: { conditionalCreate: true, strongReadAfterWrite: true, consistentListing: true },
+    })
+  }
   if (config.runtimeStorage.forcePathStyle !== undefined)
     Object.assign(options, { forcePathStyle: config.runtimeStorage.forcePathStyle })
   if (config.runtimeStorage.credentials !== undefined) {
