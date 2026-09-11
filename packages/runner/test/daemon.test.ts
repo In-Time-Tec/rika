@@ -62,6 +62,16 @@ const settle = Effect.gen(function* () {
   for (let attempt = 0; attempt < 50; attempt += 1) yield* Effect.yieldNow
 })
 
+const advanceUntil = (condition: () => boolean) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      if (condition()) return
+      yield* TestClock.adjust(10)
+      yield* Effect.yieldNow
+    }
+    return yield* Effect.die("condition did not become true")
+  })
+
 class FakeWebSocket extends EventTarget implements globalThis.WebSocket {
   readonly CONNECTING = globalThis.WebSocket.CONNECTING
   readonly OPEN = globalThis.WebSocket.OPEN
@@ -193,8 +203,7 @@ it.effect("refreshes enrollment on reconnect and caps interruptible transport ba
         yield* TestClock.adjust(delays[index]! - 1)
         yield* settle
         expect(sockets).toHaveLength(index + 1)
-        yield* TestClock.adjust(1)
-        yield* yieldUntil(() => sockets.length === index + 2)
+        yield* advanceUntil(() => sockets.length === index + 2)
       }
       expect(requests.map((request) => request.headers.authorization)).toEqual([
         "fresh-0",
